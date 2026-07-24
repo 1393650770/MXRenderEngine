@@ -78,6 +78,9 @@ public:
 	// Query
 	bool METHOD(IsMouseInteracting)() CONST;
 
+	// Debug — enable the backend's visual debugger (RmlUi: F8 to toggle)
+	void METHOD(EnableDebugger)(bool enable);
+
 	/// @internal Returns an opaque pointer to the backend model constructor.
 	/// For use by generated Bind*() functions.  Cast to Rml::DataModelConstructor*
 	/// in code that knows the backend type.

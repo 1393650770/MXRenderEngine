@@ -135,6 +135,9 @@ public:
 	/// Get the input bridge (for priority config).
 	RmlUIInputBridge* METHOD(GetInputBridge)() CONST;
 
+	/// Get the RmlUi context (for debugger, etc).
+	Rml::Context* METHOD(GetContext)() CONST { return m_context; }
+
 	/// Load a font face from file.
 	bool METHOD(LoadFontFace)(CONST String& file_path);
 

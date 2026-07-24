@@ -101,11 +101,14 @@ void RmlUIRenderer::BeginFrame(RHI::CommandList* cmd)
 	m_scissor_enabled = false;
 	m_clip_mask_enabled = false;
 
-	// Refresh viewport dimensions from backbuffer (handles window resize)
-	if (m_backbuffer_rtv)
+	// Refresh viewport dimensions from viewport (handles window resize).
+	// Use Viewport instead of cached RTV pointer — swapchain recreation
+	// invalidates the old RTV on resize.
+	if (m_viewport)
 	{
-		m_viewport_w = m_backbuffer_rtv->GetTextureDesc().width;
-		m_viewport_h = m_backbuffer_rtv->GetTextureDesc().height;
+		auto size = m_viewport->GetViewportSize();
+		m_viewport_w = size[0];
+		m_viewport_h = size[1];
 	}
 	// Transition any textures created outside render loop (font loading)
 	for (auto* t : m_pending_transitions)

@@ -41,6 +41,7 @@ private:
 
     std::unordered_map<std::string, std::string>  m_type_table;
     std::unordered_map<std::string, SchemaMoudle> m_schema_modules;
+	std::unordered_set<std::string>              m_allowed_files;
 
     std::vector<const char*>                    arguments = {{"-x",
                                            "c++",

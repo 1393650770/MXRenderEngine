@@ -120,6 +120,7 @@ function CommonLibrarySetting()
     add_files("src/ThirdParty/RmlUi/Source/Core/**.cpp")
     add_files("src/ThirdParty/RmlUi/Source/Core/Elements/**.cpp")
     add_files("src/ThirdParty/RmlUi/Source/Core/Layout/**.cpp")
+    add_files("src/ThirdParty/RmlUi/Source/Debugger/**.cpp")
     if not is_plat("android","wasm") then
         add_files("src/ThirdParty/RmlUi/Source/Core/FontEngineDefault/**.cpp")
         add_defines("RMLUI_FONT_ENGINE_FREETYPE")
@@ -160,7 +161,6 @@ function CompileFunc()
     local folders = {
         "$(projectdir)/src/Runtime/Core",
         "$(projectdir)/src/Runtime/Platform",
-        "$(projectdir)/src/Runtime/RHI",
         "$(projectdir)/src/Runtime/Asset",
         "$(projectdir)/src/Runtime/Tool",
         "$(projectdir)/src/Runtime/UI",

@@ -68,6 +68,7 @@ body {
 }
 
 #hp-bar-bg {
+	position: relative;
 	width: 200px;
 	height: 20px;
 	background: #333333;
@@ -76,6 +77,7 @@ body {
 }
 
 #hp-bar-fill {
+	position: absolute; left: 0; top: 0; bottom: 0;
 	height: 100%;
 	background: #ff4444;
 	border-radius: 3px;
@@ -108,6 +110,73 @@ body {
 #timer-text {
 	font-size: 14px;
 	color: #cccccc;
+}
+
+/* Player Panel */
+#player-panel {
+	margin-bottom: 6px;
+}
+
+#player-label {
+	font-size: 14px;
+	color: #88ccff;
+}
+
+/* Volume Panel */
+#volume-panel {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+#volume-label {
+	font-size: 14px;
+	color: #ffaa44;
+	margin-right: 10px;
+	width: 80px;
+}
+
+input[type="range"] {
+	width: 160px;
+	height: 16px;
+}
+
+input[type="range"] {
+	width: 200px;
+	height: 20px;
+}
+
+/* Slider internal elements (WidgetSlider creates these as non-DOM children) */
+slidertrack {
+	display: block;
+	height: 6px;
+	background: #444444;
+	border-radius: 3px;
+}
+
+sliderbar {
+	display: block;
+	width: 14px;
+	height: 18px;
+	background: #ffaa44;
+	border-radius: 3px;
+}
+
+sliderprogress {
+	display: block;
+	height: 6px;
+	background: #ffaa4466;
+	border-radius: 3px;
+}
+
+sliderarrowdec,
+sliderarrowinc {
+	display: block;
+	width: 12px;
+	height: 16px;
+	background: #888888;
+	border-radius: 2px;
 }
 
 /* Action Panel */

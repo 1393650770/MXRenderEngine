@@ -9,7 +9,7 @@
 		<div id="hp-panel">
 			<div id="hp-label">HP</div>
 			<div id="hp-bar-bg">
-				<div id="hp-bar-fill" data-value="hp">HP fill</div>
+				<div id="hp-bar-fill" data-style-width="hp + '%'">HP fill</div>
 			</div>
 			<div id="hp-text">{{ hp }} / 100</div>
 		</div>
@@ -35,12 +35,12 @@
 		<div id="action-panel">
 			<button id="heal-btn" data-event-click="on_heal()">Heal +10</button>
 		</div>
+	</div>
 
-		<!-- Title -->
-		<div id="title-panel">
-			<h2>MyRenderer RmlUI Demo</h2>
-			<p>All 4 UI_BIND_* macros: AS / FIELD / TWO_WAY / EVENT</p>
-		</div>
+	<!-- Title — outside hud-container so absolute is relative to body -->
+	<div id="title-panel">
+		<h2>MyRenderer RmlUI Demo</h2>
+		<p>All 4 UI_BIND_* macros: AS / FIELD / TWO_WAY / EVENT</p>
 	</div>
 </body>
 </rml>

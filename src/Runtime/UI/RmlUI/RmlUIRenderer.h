@@ -9,6 +9,9 @@
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)
+class Viewport;
+MYRENDERER_END_NAMESPACE
+MYRENDERER_BEGIN_NAMESPACE(RHI)
 class Buffer;
 class Texture;
 class Shader;
@@ -41,6 +44,8 @@ public:
 
 	/// Initialize Vulkan resources (shaders, PSOs). Must be called after RHI is ready.
 	void METHOD(Initialize)(RHI::CommandList* cmd_list, RHI::Texture* backbuffer_rtv, RHI::Texture* backbuffer_dsv, UInt32 viewport_w, UInt32 viewport_h);
+	/// Set viewport reference for resize-safe size query in BeginFrame.
+	void METHOD(SetViewport)(RHI::Viewport* vp) { m_viewport = vp; }
 
 	/// Release all Vulkan resources.
 	void METHOD(Shutdown)();
@@ -125,6 +130,7 @@ private:
 
 	RHI::Texture* m_backbuffer_rtv = nullptr;
 	RHI::Texture* m_backbuffer_dsv = nullptr;
+	RHI::Viewport* m_viewport = nullptr;
 
 	// Texture handle → texture mapping
 	struct TexSlot {

@@ -105,6 +105,7 @@ bool MetaParser::parseProject()
     std::string context = buffer.str();
 
     auto         inlcude_files = Utils::split(context, ";");
+	for (auto& f : inlcude_files) { std::string p = f; for (auto& c : p) if (c == char(92)) c = char(47); m_allowed_files.insert(p); }
     std::fstream include_file;
 
     include_file.open(m_source_include_file_name, std::ios::out);
@@ -222,6 +223,13 @@ void MetaParser::buildClassAST(const Cursor& cursor, Namespace& current_namespac
         if (child.isDefinition() && (kind == CXCursor_ClassDecl || kind == CXCursor_StructDecl))
         {
             auto class_ptr = std::make_shared<Class>(child, current_namespace);
+	    // Source file whitelist: skip indirect includes (ThirdParty, etc.)
+		    if (!m_allowed_files.empty()) {
+		        std::string src = class_ptr->getSourceFile();
+		        std::replace(src.begin(), src.end(), char(92), char(47));
+		        if (m_allowed_files.find(src) == m_allowed_files.end())
+		            continue;
+		    }
             TRY_ADD_LANGUAGE_TYPE(class_ptr, classes);
         }
         else

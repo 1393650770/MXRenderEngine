@@ -6,6 +6,7 @@
 #include "UI/RmlUI/RmlUIInputBridge.h"  // full type for inheritance upcast
 
 #include <RmlUi/Core/DataModelHandle.h>  // for Rml::DataEventFunc cast
+#include <RmlUi/Debugger.h>              // for EnableDebugger
 #include "RHI/RenderViewport.h"
 #include "RHI/RenderCommandList.h"
 
@@ -144,6 +145,20 @@ bool UIManager::LoadFontFace(CONST String& file_path)
 bool UIManager::IsMouseInteracting() CONST
 {
 	return m_impl->backend->IsMouseInteracting();
+}
+
+void UIManager::EnableDebugger(bool enable)
+{
+	if (enable)
+	{
+		auto* ctx = m_impl->backend->GetContext();
+		if (ctx && !Rml::Debugger::IsVisible())
+			Rml::Debugger::Initialise(ctx);
+	}
+	else
+	{
+		Rml::Debugger::Shutdown();
+	}
 }
 
 MYRENDERER_END_NAMESPACE // UI

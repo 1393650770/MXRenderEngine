@@ -36,6 +36,7 @@ void RmlUIDemoApp::OnInitScene()
 	std::cout << "[RmlUIDemo] OnInitScene" << std::endl;
 
 	UIManager::Create(viewport);
+	UIManager::Get().EnableDebugger(true);
 
 	UIManager::Get().LoadFontFace("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-latin.ttf");
 	UIManager::Get().LoadFontFace("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-zh_cn.ttf");
