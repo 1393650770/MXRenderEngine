@@ -6,6 +6,9 @@
 #if PLATFORM_WGPU
 #include "Platform/WGPU/EmscriptenWindow.h"
 #endif
+#if PLATFORM_GLES3
+#include "Platform/GLES3/EmscriptenGLWindow.h"
+#endif
 
 #include <iostream>
 #include <memory>
@@ -33,9 +36,13 @@ void Window::InitWindow()
 	if (platform_window->IsMobile())
 		return; // Android: RHI init deferred to when window becomes ready
 	RHIInit();
+#if PLATFORM_WGPU || PLATFORM_GLES3
+	// WebGPU/GLES3: viewport creation deferred to platform window's InitRHIAndViewport
 #if PLATFORM_WGPU
-	// WebGPU: viewport creation deferred to EmscriptenWindow::InitRHIAndViewport
-	// (async device init must complete before CreateViewport can succeed).
+	// (WGPU: async device init must complete before CreateViewport can succeed).
+#else
+	// (GLES3: GL context created in EmscriptenGLWindow, viewport follows).
+#endif
 #else
 	viewport = RHICreateViewport(platform_window->GetNativeHandle(), width, height, is_full_screen);
 #endif
@@ -51,6 +58,7 @@ void Window::Run(RenderInterface* render)
 		return;
 	}
 #endif
+#if PLATFORM_WGPU || PLATFORM_GLES3
 #if PLATFORM_WGPU
 	if (auto* ew = dynamic_cast<EmscriptenWindow*>(platform_window.get()))
 	{
@@ -58,6 +66,14 @@ void Window::Run(RenderInterface* render)
 		ew->StartEventLoop();
 		return;
 	}
+#else
+	if (auto* ew = dynamic_cast<EmscriptenGLWindow*>(platform_window.get()))
+	{
+		ew->SetRenderInterface(render);
+		ew->StartEventLoop();
+		return;
+	}
+#endif
 #endif
 
 	EThreadingMode mode = g_thread_mode;

@@ -19,7 +19,7 @@
 #define __forceinline __attribute__((always_inline)) inline
 #endif
 
-#if !PLATFORM_ANDROID && !PLATFORM_WGPU
+#if !PLATFORM_ANDROID && !PLATFORM_WGPU && !PLATFORM_GLES3
 #include <boost/stacktrace.hpp>
 #endif
 #include <iostream>
@@ -97,8 +97,8 @@
 #include <android/log.h>
 #define CHECK_WITH_LOG(Flag, ...) if(Flag) { __android_log_print(ANDROID_LOG_ERROR, "MXRender", "CHECK: %s", __VA_ARGS__); throw std::runtime_error("CHECK failed"); }
 #define CHECK_WITH_LOG_WARNING(Flag, ...) if(Flag) { __android_log_print(ANDROID_LOG_WARN, "MXRender", "CHECK: %s", __VA_ARGS__); }
-#elif PLATFORM_WGPU
-// WebGPU/wasm: Boost not available, use cout for diagnostics (UE pattern — never silent-fail)
+#elif PLATFORM_WGPU || PLATFORM_GLES3
+// WebGPU/GLES3 wasm: Boost not available, use cout for diagnostics (UE pattern — never silent-fail)
 #define CHECK_WITH_LOG(Flag,LOG) if(Flag) \
                                 {\
                                     std::cout<<"CHECK: "<<String(LOG)<<std::endl; \

@@ -76,9 +76,9 @@ function PlatformSettings()
         add_cxflags("-Wno-c++11-narrowing")
         add_ldflags("-Wl,--unresolved-symbols=ignore-in-shared-libs", {force = true})
     elseif is_plat("wasm") then
-        add_defines("PLATFORM_WGPU")
+        add_defines("PLATFORM_GLES3")
         add_cxflags("-Wno-c++11-narrowing")
-        add_ldflags("-sUSE_WEBGPU=1", "-sASYNCIFY=1", "-sALLOW_MEMORY_GROWTH=1", {force = true})
+        add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1", {force = true})
     end
 end
 
@@ -95,8 +95,10 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
     elseif is_plat("wasm") then
         remove_files("src/Runtime/RHI/Vulkan/**")
+        remove_files("src/Runtime/RHI/WebGPU/**")
         remove_files("src/Runtime/Platform/Win/**")
         remove_files("src/Runtime/Platform/Android/**")
+        remove_files("src/Runtime/Platform/WGPU/**.cpp")
         remove_files("src/Runtime/Platform/Desktop/**.cpp")
         remove_files("src/Runtime/Tool/MeshLoader.cpp")
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
@@ -519,5 +521,17 @@ target("RendererSample-RmlUI")
         end
     end)
     after_build(MoveResource)
+
+--   MiniGame GLES3 HelloTriangle (Phase 0: wasm-only GLES3 RHI backend validation)
+target("MiniGame-HelloTriangle")
+    if is_plat("wasm") then
+        CommonProjectSetting()
+        add_files("src/Sample/MiniGame-HelloTriangle/HelloTriangle.cpp")
+    else
+        set_kind("binary")
+        add_deps("Runtime")
+    end
+    set_group("Sample")
+
 
 
