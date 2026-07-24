@@ -1,0 +1,293 @@
+# Copyright 2020 The Emscripten Authors.  All rights reserved.
+# Emscripten is available under two separate licenses, the MIT license and the
+# University of Illinois/NCSA Open Source License.  Both these licenses can be
+# found in the LICENSE file.
+
+import logging
+import os
+import shlex
+import shutil
+import sys
+
+from . import diagnostics, utils
+from .utils import __rootpath__, exit_with_error, path_from_root
+
+logger = logging.getLogger('config')
+
+# The following class can be overridden by the config file and/or
+# environment variables.  Specifically any variable whose name
+# is in ALL_UPPER_CASE is considered a valid config file key.
+# See parse_config_file below.
+EMSCRIPTEN_ROOT = __rootpath__
+NODE_JS = None
+BINARYEN_ROOT = None
+LLVM_ADD_VERSION = None
+CLANG_ADD_VERSION = None
+CLOSURE_COMPILER = None
+FROZEN_CACHE = None
+CACHE = None
+PORTS = None
+COMPILER_WRAPPER = None
+LLVM_ROOT = None
+
+# Set by init()
+EM_CONFIG = None
+
+
+def listify(x):
+  if x is None:
+    return x
+  if type(x) is list:
+    logger.warning(f'Found list-style config entry ({x}).  Please use a single string with spaces between args.')
+    return x
+  # Use posix=True here so that quotes are handled as expected, but clear the
+  # `escape` list so that backslashes are not treated as escape chars (which
+  # would break windows pathnames that use backslashes).
+  lexer = shlex.shlex(x, posix=True)
+  lexer.escape = []
+  lexer.whitespace_split = True
+  return list(lexer)
+
+
+def normalize_config_settings():
+  global CACHE, PORTS, CLOSURE_COMPILER, NODE_JS
+
+  NODE_JS = listify(NODE_JS)
+  CLOSURE_COMPILER = listify(CLOSURE_COMPILER)
+  if not CACHE:
+    CACHE = path_from_root('cache')
+  if not PORTS:
+    PORTS = os.path.join(CACHE, 'ports')
+
+
+def normalize_relative_python_path():
+  # User may have specified the EMSDK_PYTHON environment variable to point to
+  # the Python interpreter, e.g.
+  #
+  #  EMSDK_PYTHON=../../path/to/python emcc test/hello_world.c
+  #
+  # As part of its operation, emcc may spawn sub-emcc tasks when building
+  # libraries to cache. These sub-emcc tasks will run in a different CWD, so
+  # reinitialize EMSDK_PYTHON here so that sub-tool spawns will use the same
+  # Python interpreter as the parent.
+  if os.environ.get('EMSDK_PYTHON'):
+    os.environ['EMSDK_PYTHON'] = sys.executable
+
+
+def set_config_from_tool_location(config_key, tool_binary, f):
+  val = globals()[config_key]
+  if val is None:
+    path = shutil.which(tool_binary)
+    if not path:
+      if not os.path.isfile(EM_CONFIG):
+        diagnostics.warn('config file not found: %s.  You can create one by hand or run `emcc --generate-config`', EM_CONFIG)
+      exit_with_error('%s not set in config (%s), and `%s` not found in PATH', config_key, EM_CONFIG, tool_binary)
+    globals()[config_key] = f(path)
+  elif not val:
+    exit_with_error('%s is set to empty value in %s', config_key, EM_CONFIG)
+
+
+def expandvars(value):
+  if isinstance(value, str):
+    return os.path.expandvars(os.path.expanduser(value))
+  elif isinstance(value, list):
+    return [expandvars(v) for v in value]
+  return value
+
+
+def parse_config_file():
+  """Parse the emscripten config file using python's exec.
+
+  Also check EM_<KEY> environment variables to override specific config keys.
+  """
+  config = {'__file__': EM_CONFIG}
+  config_text = utils.read_file(EM_CONFIG)
+  # Add $CFGDIR expansion similar to that used in llvm config files:
+  # https://clang.llvm.org/docs/UsersManual.html#configuration-files
+  os.environ['CFGDIR'] = os.path.dirname(EM_CONFIG)
+  try:
+    exec(config_text, config)
+  except Exception as e:
+    exit_with_error('error in evaluating config file (%s): %s, text: %s', EM_CONFIG, e, config_text)
+
+  CONFIG_KEYS = (
+    'NODE_JS',
+    'BINARYEN_ROOT',
+    'LLVM_ROOT',
+    'LLVM_ADD_VERSION',
+    'CLANG_ADD_VERSION',
+    'CLOSURE_COMPILER',
+    'FROZEN_CACHE',
+    'CACHE',
+    'PORTS',
+    'COMPILER_WRAPPER',
+  )
+
+  if '_EM_TEST_RUNNER' in os.environ:
+    # TODO(sbc): Move this completely out of the core compiler and into the test framework.
+    TEST_KEYS = (
+      'NODE_JS_TEST',
+      'V8_ENGINE',
+      'SPIDERMONKEY_ENGINE',
+      'JS_ENGINES',
+      'WASMER',
+      'WASMTIME',
+      'WASM_ENGINES',
+    )
+    CONFIG_KEYS += TEST_KEYS
+    for key in TEST_KEYS:
+      globals()[key] = None
+
+  # Only propagate certain settings from the config file.
+  for key in CONFIG_KEYS:
+    env_var = 'EM_' + key
+    env_value = os.environ.get(env_var)
+    if env_value is not None:
+      if env_value in {'', '0'}:
+        env_value = None
+      # Unlike the other keys these two should always be lists.
+      if env_var in {'EM_JS_ENGINES', 'EM_WASM_ENGINES'}:
+        env_value = env_value.split(',')
+      if env_var in {'EM_CONFIG', 'EM_CACHE', 'EM_PORTS', 'EM_LLVM_ROOT', 'EM_BINARYEN_ROOT'}:
+        if not os.path.isabs(env_value):
+          exit_with_error(f'environment variable {env_var} must be an absolute path: {env_value}')
+      globals()[key] = env_value
+    elif key in config:
+      globals()[key] = expandvars(config[key])
+
+
+def read_config():
+  if os.path.isfile(EM_CONFIG):
+    parse_config_file()
+
+  set_config_from_tool_location('LLVM_ROOT', 'clang', os.path.dirname)
+  set_config_from_tool_location('NODE_JS', 'node', lambda x: x)
+  set_config_from_tool_location('BINARYEN_ROOT', 'wasm-opt', lambda x: os.path.dirname(os.path.dirname(x)))
+
+  normalize_config_settings()
+  normalize_relative_python_path()
+
+
+def generate_config(path):
+  if os.path.exists(path):
+    exit_with_error(f'config file already exists: `{path}`')
+
+  # Note: repr is used to ensure the paths are escaped correctly on Windows.
+  # The full string is replaced so that the template stays valid Python.
+
+  config_data = utils.read_file(path_from_root('tools/config_template.py'))
+  config_data = config_data.splitlines()[3:] # remove the initial comment
+  config_data = '\n'.join(config_data) + '\n'
+  # autodetect some default paths
+  llvm_root = os.path.dirname(shutil.which('wasm-ld') or '/usr/bin/wasm-ld')
+  config_data = config_data.replace("'{{{ LLVM_ROOT }}}'", repr(llvm_root))
+
+  binaryen_root = os.path.dirname(os.path.dirname(shutil.which('wasm-opt') or '/usr/local/bin/wasm-opt'))
+  config_data = config_data.replace("'{{{ BINARYEN_ROOT }}}'", repr(binaryen_root))
+
+  node = shutil.which('node') or shutil.which('nodejs') or 'node'
+  config_data = config_data.replace("'{{{ NODE }}}'", repr(node))
+
+  # write
+  utils.write_file(path, config_data)
+
+  print('''\
+An Emscripten settings file has been generated at:
+
+  %s
+
+It contains our best guesses for the important paths, which are:
+
+  LLVM_ROOT       = %s
+  BINARYEN_ROOT   = %s
+  NODE_JS         = %s
+
+Please edit the file if any of those are incorrect.\
+''' % (path, llvm_root, binaryen_root, node), file=sys.stderr)
+
+
+def find_config_file():
+  # Emscripten configuration is done through the --em-config command line option
+  # or the EM_CONFIG environment variable. If the specified string value contains
+  # newline or semicolon-separated definitions, then these definitions will be
+  # used to configure Emscripten.  Otherwise, the string is understood to be a
+  # path to a settings file that contains the required definitions.
+  # The search order from the config file is as follows:
+  # 1. Specified on the command line (--em-config)
+  # 2. Specified via EM_CONFIG environment variable
+  # 3. Local .emscripten file, if found
+  # 4. Local .emscripten file, as used by `emsdk --embedded` (two levels above,
+  #    see below)
+  # 5. User home directory config (~/.emscripten), if found.
+
+  if '--em-config' in sys.argv:
+    i = sys.argv.index('--em-config')
+    if len(sys.argv) <= i + 1:
+      exit_with_error('--em-config must be followed by a filename')
+    del sys.argv[i]
+    # Now the i'th argument is the emconfig filename
+    return sys.argv.pop(i)
+
+  if 'EM_CONFIG' in os.environ:
+    return os.environ['EM_CONFIG']
+
+  embedded_config = path_from_root('.emscripten')
+  if os.path.isfile(embedded_config):
+    return embedded_config
+
+  # For compatibility with `emsdk --embedded` mode also look two levels up.  The
+  # layout of the emsdk puts emcc two levels below emsdk.  For example:
+  #  - emsdk/upstream/emscripten/emcc
+  #  - emsdk/emscripten/1.38.31/emcc
+  # However `emsdk --embedded` stores the config file in the emsdk root.
+  # Without this check, when emcc is run from within the emsdk in embedded mode
+  # and the user forgets to first run `emsdk_env.sh` (which sets EM_CONFIG) emcc
+  # will not see any config file at all and fall back to creating a new/empty
+  # one.
+  # We could remove this special case if emsdk were to write its embedded config
+  # file into the emscripten directory itself.
+  # See: https://github.com/emscripten-core/emsdk/pull/367
+  emsdk_root = os.path.dirname(os.path.dirname(path_from_root()))
+  emsdk_embedded_config = os.path.join(emsdk_root, '.emscripten')
+
+  if os.path.isfile(emsdk_embedded_config):
+    return emsdk_embedded_config
+
+  user_home_config = os.path.expanduser('~/.emscripten')
+  if os.path.isfile(user_home_config):
+    return user_home_config
+
+  return embedded_config
+
+
+def init():
+  global EM_CONFIG
+  EM_CONFIG = find_config_file()
+
+  # We used to support inline EM_CONFIG.
+  if '\n' in EM_CONFIG:
+    exit_with_error('inline EM_CONFIG data no longer supported.  Please use a config file.')
+
+  EM_CONFIG = os.path.expanduser(EM_CONFIG)
+
+  # This command line flag needs to work even in the absence of a config
+  # file, so we must process it here at script import time (otherwise
+  # the error below will trigger).
+  if '--generate-config' in sys.argv:
+    generate_config(EM_CONFIG)
+    sys.exit(0)
+
+  if os.path.isfile(EM_CONFIG):
+    logger.debug(f'using config file: {EM_CONFIG}')
+  else:
+    logger.debug('config file not found; using default config')
+
+  # Emscripten compiler spawns other processes, which can reimport shared.py, so
+  # make sure that those child processes get the same configuration file by
+  # setting it to the currently active environment.
+  os.environ['EM_CONFIG'] = EM_CONFIG
+
+  read_config()
+
+
+init()

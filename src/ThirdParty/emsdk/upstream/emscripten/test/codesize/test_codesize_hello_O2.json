@@ -1,0 +1,35 @@
+{
+  "a.out.js": 3859,
+  "a.out.js.gz": 1970,
+  "a.out.nodebug.wasm": 1912,
+  "a.out.nodebug.wasm.gz": 1129,
+  "total": 5771,
+  "total_gz": 3099,
+  "sent": [
+    "fd_write"
+  ],
+  "imports": [
+    "wasi_snapshot_preview1.fd_write"
+  ],
+  "exports": [
+    "__indirect_function_table",
+    "__wasm_call_ctors",
+    "_emscripten_stack_alloc",
+    "_emscripten_stack_restore",
+    "emscripten_stack_get_current",
+    "main",
+    "memory"
+  ],
+  "funcs": [
+    "$__emscripten_stdout_close",
+    "$__emscripten_stdout_seek",
+    "$__stdio_write",
+    "$__towrite",
+    "$__wasi_syscall_ret",
+    "$__wasm_call_ctors",
+    "$_emscripten_stack_alloc",
+    "$_emscripten_stack_restore",
+    "$emscripten_stack_get_current",
+    "$main"
+  ]
+}

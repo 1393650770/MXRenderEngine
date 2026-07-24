@@ -1,0 +1,406 @@
+/*
+ * Copyright 2021 The Emscripten Authors.  All rights reserved.
+ * Emscripten is available under two separate licenses, the MIT license and the
+ * University of Illinois/NCSA Open Source License.  Both these licenses can be
+ * found in the LICENSE file.
+ */
+
+#include "pthread_impl.h"
+#include "stdio_impl.h"
+#include "assert.h"
+#include <pthread.h>
+#include <stdbool.h>
+#include <string.h>
+#include <threads.h>
+#include <unistd.h>
+
+#include <emscripten/heap.h>
+#include <emscripten/threading.h>
+
+#define STACK_ALIGN __BIGGEST_ALIGNMENT__
+#define TSD_ALIGN (sizeof(void*))
+
+// Comment this line to enable tracing of thread creation and destruction:
+// #define PTHREAD_DEBUG
+#ifdef PTHREAD_DEBUG
+#define dbg(fmt, ...) emscripten_dbgf(fmt, ##__VA_ARGS__)
+#else
+#define dbg(fmt, ...)
+#endif
+
+// See musl's pthread_create.c
+
+static void dummy_0() {}
+weak_alias(dummy_0, __pthread_tsd_run_dtors);
+weak_alias(dummy_0, __do_orphaned_stdio_locks);
+weak_alias(dummy_0, __dl_thread_cleanup);
+
+static void __run_cleanup_handlers() {
+  pthread_t self = __pthread_self();
+  while (self->cancelbuf) {
+    void (*f)(void *) = self->cancelbuf->__f;
+    void *x = self->cancelbuf->__x;
+    self->cancelbuf = self->cancelbuf->__next;
+    f(x);
+  }
+}
+
+void __do_cleanup_push(struct __ptcb *cb) {
+  struct pthread *self = __pthread_self();
+  cb->__next = self->cancelbuf;
+  self->cancelbuf = cb;
+}
+
+void __do_cleanup_pop(struct __ptcb *cb) {
+  __pthread_self()->cancelbuf = cb->__next;
+}
+
+static FILE *volatile dummy_file = 0;
+weak_alias(dummy_file, __stdin_used);
+weak_alias(dummy_file, __stdout_used);
+weak_alias(dummy_file, __stderr_used);
+
+static void init_file_lock(FILE *f) {
+  if (f && f->lock<0) f->lock = 0;
+}
+
+static int tl_lock_count;
+static int tl_lock_waiters;
+
+volatile int __thread_list_lock;
+
+void __tl_lock(void) {
+  int tid = __pthread_self()->tid;
+  int val = __thread_list_lock;
+  if (val == tid) {
+    tl_lock_count++;
+    return;
+  }
+  while ((val = a_cas(&__thread_list_lock, 0, tid)))
+    __wait(&__thread_list_lock, &tl_lock_waiters, val, 0);
+}
+
+void __tl_unlock(void) {
+  if (tl_lock_count) {
+    tl_lock_count--;
+    return;
+  }
+  a_store(&__thread_list_lock, 0);
+  if (tl_lock_waiters) __wake(&__thread_list_lock, 1, 0);
+}
+
+void __tl_sync(pthread_t td)
+{
+	a_barrier();
+	int val = __thread_list_lock;
+	if (!val) return;
+	__wait(&__thread_list_lock, &tl_lock_waiters, val, 0);
+	if (tl_lock_waiters) __wake(&__thread_list_lock, 1, 0);
+}
+
+/* pthread_key_create.c overrides this */
+static volatile size_t dummy = 0;
+weak_alias(dummy, __pthread_tsd_size);
+
+#define ROUND_UP(x, ALIGNMENT) (((x)+ALIGNMENT-1)&-ALIGNMENT)
+
+int __pthread_create(pthread_t* restrict res,
+                     const pthread_attr_t* restrict attrp,
+                     void* (*entry)(void*),
+                     void* restrict arg) {
+  // Note on LSAN: lsan intercepts/wraps calls to pthread_create so any
+  // allocations we do here should not be considered leaks.
+  // See: lsan_interceptors.cpp.
+  if (!res) {
+    return EINVAL;
+  }
+
+  if (!libc.threaded) {
+    for (FILE *f=*__ofl_lock(); f; f=f->next)
+      init_file_lock(f);
+    __ofl_unlock();
+    init_file_lock(__stdin_used);
+    init_file_lock(__stdout_used);
+    init_file_lock(__stderr_used);
+    libc.threaded = 1;
+  }
+
+  int c11 = (attrp == __ATTRP_C11_THREAD);
+  pthread_attr_t attr = { 0 };
+  if (attrp && !c11) attr = *attrp;
+  if (!attrp || c11) {
+    attr._a_stacksize = __default_stacksize;
+    attr._a_guardsize = __default_guardsize;
+  }
+
+  size_t guard_size = 0;
+
+  // Allocate memory for new thread.  The layout of the thread block is
+  // as follows.  From low to high address:
+  //
+  // 1. pthread struct (sizeof struct pthread)
+  // 2. tls data       (__builtin_wasm_tls_size())
+  // 3. tsd pointers   (__pthread_tsd_size)
+  // 4. guard area     (guard_size)
+  // 5. stack          (__default_stacksize AKA -sDEFAULT_PTHREAD_STACK_SIZE)
+  size_t size = sizeof(struct pthread);
+  if (__builtin_wasm_tls_size()) {
+    size += __builtin_wasm_tls_size() + __builtin_wasm_tls_align() - 1;
+  }
+  size += __pthread_tsd_size + TSD_ALIGN - 1;
+  size_t zero_size = size;
+  if (!attr._a_stackaddr) {
+    guard_size = attr._a_guardsize;
+    size += guard_size + attr._a_stacksize + STACK_ALIGN - 1;
+    zero_size += guard_size;
+  }
+
+  // Allocate all the data for the new thread and zero-initialize all parts
+  // except for the stack.
+  unsigned char* block = emscripten_builtin_malloc(size);
+  memset(block, 0, zero_size);
+
+  uintptr_t offset = (uintptr_t)block;
+
+  // 1. pthread struct
+  struct pthread *new = (struct pthread*)offset;
+  offset += sizeof(struct pthread);
+
+  new->map_base = block;
+  new->map_size = size;
+
+  // The pthread struct has a field that points to itself - this is used as a
+  // magic ID to detect whether the pthread_t structure is 'alive'.
+  new->self = new;
+  new->tid = _emscripten_get_next_tid();
+
+  // pthread struct robust_list head should point to itself.
+  new->robust_list.head = &new->robust_list.head;
+
+  if (attr._a_detach) {
+    new->detach_state = DT_DETACHED;
+  } else {
+    new->detach_state = DT_JOINABLE;
+  }
+  new->stack_size = attr._a_stacksize;
+  new->guard_size = guard_size;
+
+  // 2. tls data
+  if (__builtin_wasm_tls_size()) {
+    offset = ROUND_UP(offset, __builtin_wasm_tls_align());
+    new->tls_base = (void*)offset;
+    offset += __builtin_wasm_tls_size();
+  }
+
+  // 3. tsd slots
+  if (__pthread_tsd_size) {
+    offset = ROUND_UP(offset, TSD_ALIGN);
+    new->tsd = (void*)offset;
+    offset += __pthread_tsd_size;
+  }
+
+  // 4. stack data
+  // musl stores top of the stack in pthread_t->stack (i.e. the high
+  // end from which it grows down).
+  if (attr._a_stackaddr) {
+    new->stack = (void*)attr._a_stackaddr;
+  } else {
+    offset += guard_size;
+    offset = ROUND_UP(offset + new->stack_size, STACK_ALIGN);
+    new->stack = (void*)offset;
+  }
+
+  // Check that we didn't use more data than we allocated.
+  assert(offset <= (uintptr_t)block + size);
+
+#ifndef NDEBUG
+  _emscripten_thread_profiler_init(new);
+#endif
+
+  _emscripten_thread_mailbox_init(new);
+
+  struct pthread *self = __pthread_self();
+  dbg("start __pthread_create: new=%p new_end=%p stack=%p->%p "
+      "stack_size=%zu tls_base=%p",
+      new,
+      new + 1,
+      (char*)new->stack - new->stack_size,
+      new->stack,
+      new->stack_size,
+      new->tls_base);
+
+  // thread may already be running/exited after the _pthread_create_js call below
+  __tl_lock();
+
+  new->next = self->next;
+  new->prev = self;
+  new->next->prev = new;
+  new->prev->next = new;
+
+  __tl_unlock();
+
+  // Set libc.need_locks before calling __pthread_create_js since
+  // by the time it returns the thread could be running and we
+  // want libc.need_locks to be set from the moment it starts.
+  if (!libc.threads_minus_1++) libc.need_locks = 1;
+
+  // Assign the pthread_t object over immediately, so that by the time pthread_create_js()
+  // is dispatched to a pthread and the pthread main runs, the value will be visible to
+  // the thread to examine.
+  // Use __atomic_store_n() instead of a_store() to avoid splicing the pointer.
+  __atomic_store_n(res, new, __ATOMIC_SEQ_CST);
+
+  int rtn = __pthread_create_js(new, &attr, entry, arg);
+  if (rtn != 0) {
+    // Reset the pthread_t return value to zero (we assigned to it above,
+    // so by clearing it here we won't litter bits to caller)
+    __atomic_store_n(res, 0, __ATOMIC_SEQ_CST);
+
+    if (!--libc.threads_minus_1) libc.need_locks = 0;
+
+    // undo previous addition to the thread list
+    __tl_lock();
+
+    new->next->prev = new->prev;
+    new->prev->next = new->next;
+    new->next = new->prev = new;
+
+    __tl_unlock();
+
+    return rtn;
+  }
+
+  dbg("done __pthread_create next=%p prev=%p new=%p",
+      self->next,
+      self->prev,
+      new);
+
+  return 0;
+}
+
+/*
+ * Called from JS main thread to free data associated with a thread
+ * that is no longer running.
+ */
+void _emscripten_thread_free_data(pthread_t t) {
+  // A thread can never free its own thread data.
+  assert(t != pthread_self());
+#ifndef NDEBUG
+  if (t->profilerBlock) {
+    emscripten_builtin_free(t->profilerBlock);
+  }
+#endif
+  // Clear the self-reference to prevent inadvertent use and
+  // inform functions that validate it that the thread is no
+  // longer available.
+  t->self = NULL;
+
+  // Free the entire thread block (called map_base because
+  // musl normally allocates this using mmap).  This region
+  // includes the pthread structure itself.
+  unsigned char* block = t->map_base;
+  dbg("_emscripten_thread_free_data thread=%p map_base=%p", t, block);
+#ifndef NDEBUG
+  // To aid in debugging, set the entire region to zero.
+  memset(block, 0, sizeof(struct pthread));
+#endif
+  emscripten_builtin_free(block);
+}
+
+void _emscripten_thread_exit(void* result) {
+  pthread_t self = __pthread_self();
+  assert(self);
+
+  self->canceldisable = 1;
+  self->cancelasync = 0;
+  self->result = result;
+
+  _emscripten_thread_mailbox_shutdown(self);
+
+  // Run any handlers registered with pthread_cleanup_push
+  __run_cleanup_handlers();
+
+  // Call into the musl function that runs destructors of all thread-specific data.
+  __pthread_tsd_run_dtors();
+
+  // If this is the main runtime thread, don't proceed with
+  // termination of the thread, but prepare for exit to call
+  // atexit handlers.
+  if (emscripten_is_main_runtime_thread()) {
+    exit(0);
+  }
+
+  /* At this point we are committed to thread termination. */
+
+  /* The thread list lock must be AS-safe. */
+  __tl_lock();
+
+  /* Process robust list in userspace to handle non-pshared mutexes
+   * and the detached thread case where the robust list head will
+   * be invalid when the kernel would process it. */
+  __vm_lock();
+  volatile void *volatile *rp;
+  while ((rp=self->robust_list.head) && rp != &self->robust_list.head) {
+    pthread_mutex_t *m = (void *)((char *)rp
+      - offsetof(pthread_mutex_t, _m_next));
+    int waiters = m->_m_waiters;
+    int priv = (m->_m_type & 128) ^ 128;
+    self->robust_list.pending = rp;
+    self->robust_list.head = *rp;
+    int cont = a_swap(&m->_m_lock, 0x40000000);
+    self->robust_list.pending = 0;
+    if (cont < 0 || waiters)
+      __wake(&m->_m_lock, 1, priv);
+  }
+  __vm_unlock();
+
+  __do_orphaned_stdio_locks();
+  __dl_thread_cleanup();
+
+  /* Last, unlink thread from the list. This change will not be visible
+   * until the lock is released via __tl_unlock() below. */
+  if (!--libc.threads_minus_1) libc.need_locks = 0;
+  self->next->prev = self->prev;
+  self->prev->next = self->next;
+  self->prev = self->next = self;
+
+  __tl_unlock();
+
+  // Not hosting a pthread anymore in this worker set __pthread_self to NULL
+  __set_thread_state(NULL, 0, 0, 1);
+
+  /* This atomic potentially competes with a concurrent pthread_detach
+   * call; the loser is responsible for freeing thread resources. */
+  int state = a_cas(&self->detach_state, DT_JOINABLE, DT_EXITING);
+
+  if (state == DT_DETACHED) {
+    _emscripten_thread_cleanup(self);
+  } else {
+    // Mark the thread as no longer running, so it can be joined.
+    // Once we publish this, any threads that are waiting to join with us can
+    // proceed and this worker can be recycled and used on another thread.
+#ifdef EMSCRIPTEN_DYNAMIC_LINKING
+    // When dynamic linking is enabled we need to keep track of zombie threads
+    _emscripten_thread_exit_joinable(self);
+#endif
+
+    /* Wake any joiner. */
+    a_store(&self->detach_state, DT_EXITED);
+    __wake(&self->detach_state, 1, 1);
+  }
+}
+
+// Mark as `no_sanitize("address")` since emscripten_pthread_exit destroys
+// the current thread and runs its exit handlers.  Without this asan injects
+// a call to __asan_handle_no_return before emscripten_unwind_to_js_event_loop
+// which seem to cause a crash later down the line.
+__attribute__((no_sanitize("address")))
+_Noreturn void __pthread_exit(void* retval) {
+  _emscripten_thread_exit(retval);
+  emscripten_unwind_to_js_event_loop();
+}
+
+weak_alias(__pthread_create, emscripten_builtin_pthread_create);
+weak_alias(__pthread_create, pthread_create);
+weak_alias(__pthread_exit, emscripten_builtin_pthread_exit);
+weak_alias(__pthread_exit, pthread_exit);

@@ -1,0 +1,7 @@
+
+This contains mimalloc 477c1d71c75a92255b3bdffb6f9dcae0c31d21c8 (v3.4.1) with
+Emscripten-specific changes.
+
+Origin: https://github.com/microsoft/mimalloc
+
+For the Emscripten port design see src/prim/emscripten/prim.c

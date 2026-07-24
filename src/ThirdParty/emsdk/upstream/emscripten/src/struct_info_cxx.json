@@ -1,0 +1,36 @@
+[
+    {
+        "file": "cxa_exception.h",
+        "structs": {
+            "__cxxabiv1::__cxa_exception": [
+              "exceptionDestructor",
+              "exceptionType",
+              "caught",
+              "rethrown",
+              "adjustedPtr"
+            ]
+        }
+    },
+    // ===========================================
+    // WasmFS
+    // ===========================================
+    {
+        "file": "file.h",
+        "defines": [
+            "wasmfs::File::UnknownKind",
+            "wasmfs::File::DataFileKind",
+            "wasmfs::File::DirectoryKind",
+            "wasmfs::File::SymlinkKind"
+        ]
+    },
+    // Embind
+    {
+        "file": "emscripten/val.h",
+        "defines": [
+            "emscripten::internal::EM_INVOKER_KIND::FUNCTION",
+            "emscripten::internal::EM_INVOKER_KIND::METHOD",
+            "emscripten::internal::EM_INVOKER_KIND::CONSTRUCTOR",
+            "emscripten::internal::EM_INVOKER_KIND::CAST"
+        ]
+    }
+]

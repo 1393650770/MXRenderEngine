@@ -1,0 +1,338 @@
+/**
+ * @license
+ * Copyright 2010 The Emscripten Authors
+ * SPDX-License-Identifier: MIT
+ */
+
+// === Auto-generated postamble setup entry stuff ===
+
+#if LOAD_SOURCE_MAP
+#include "source_map_support.js"
+#endif
+
+#if ASSERTIONS
+var calledRun;
+#endif
+
+#if STANDALONE_WASM && MAIN_READS_PARAMS
+var mainArgs = undefined;
+#endif
+
+#if HAS_MAIN
+#if MAIN_READS_PARAMS
+{{{ asyncIf(ASYNCIFY == 2) }}}function callMain(args = []) {
+#else
+{{{ asyncIf(ASYNCIFY == 2) }}}function callMain() {
+#endif
+#if ASSERTIONS
+#if '$runDependencies' in addedLibraryItems
+  assert(runDependencies == 0, 'cannot call main when async dependencies remain! (listen on Module["onRuntimeInitialized"])');
+#endif
+  assert(typeof onPreRuns === 'undefined' || onPreRuns.length == 0, 'cannot call main when preRun functions remain to be called');
+#endif
+
+  var entryFunction = {{{ getEntryFunction() }}};
+
+#if PROXY_TO_PTHREAD
+  // With PROXY_TO_PTHREAD make sure we keep the runtime alive until the
+  // proxied main calls exit (see exitOnMainThread() for where Pop is called).
+  {{{ runtimeKeepalivePush() }}}
+#endif
+
+#if MAIN_MODULE
+  // Main modules can't tell if they have main() at compile time, since it may
+  // arrive from a dynamic library.
+  if (!entryFunction) return;
+#endif
+
+#if MAIN_READS_PARAMS && STANDALONE_WASM
+  mainArgs = [thisProgram].concat(args)
+#elif MAIN_READS_PARAMS
+  args.unshift(thisProgram);
+
+  var argc = args.length;
+  var argv = stackAlloc((argc + 1) * {{{ POINTER_SIZE }}});
+  var argv_ptr = argv;
+  for (var arg of args) {
+    {{{ makeSetValue('argv_ptr', 0, 'stringToUTF8OnStack(arg)', '*') }}};
+    argv_ptr += {{{ POINTER_SIZE }}};
+  }
+  {{{ makeSetValue('argv_ptr', 0, 0, '*') }}};
+#else
+  var argc = 0;
+  var argv = 0;
+#endif // MAIN_READS_PARAMS
+
+  try {
+#if ABORT_ON_WASM_EXCEPTIONS
+    // See abortWrapperDepth in preamble.js!
+    abortWrapperDepth++;
+#endif
+
+#if STANDALONE_WASM
+    entryFunction();
+    // _start (in crt1.c) will call exit() if main return non-zero.  So we know
+    // that if we get here main returned zero.
+    var ret = 0;
+#else
+    var ret = entryFunction(argc, {{{ to64('argv') }}});
+#endif // STANDALONE_WASM
+
+#if ASYNCIFY == 2 && !PROXY_TO_PTHREAD
+    // The current spec of JSPI returns a promise only if the function suspends
+    // and a plain value otherwise. This will likely change:
+    // https://github.com/WebAssembly/js-promise-integration/issues/11
+    ret = await ret;
+#endif // ASYNCIFY == 2
+    // if we're not running an evented main loop, it's time to exit
+    exitJS(ret, /* implicit = */ true);
+    return ret;
+  } catch (e) {
+    return handleException(e);
+  }
+#if ABORT_ON_WASM_EXCEPTIONS
+  finally {
+    // See abortWrapperDepth in preamble.js!
+    abortWrapperDepth--;
+  }
+#endif
+}
+#endif // HAS_MAIN
+
+#if STACK_OVERFLOW_CHECK
+function stackCheckInit() {
+  // This is normally called automatically during __wasm_call_ctors but need to
+  // get these values before even running any of the ctors so we call it redundantly
+  // here.
+#if ASSERTIONS && PTHREADS
+  // See $establishStackSpace for the equivalent code that runs on a thread
+  assert(!ENVIRONMENT_IS_PTHREAD);
+#endif
+  _emscripten_stack_init();
+  // TODO(sbc): Move writeStackCookie to native to to avoid this.
+  writeStackCookie();
+}
+#endif
+
+{{{ asyncIf(MODULARIZE || ASYNCIFY == 2 || expectToReceiveOnModule('setStatus') || '$runDependencies' in addedLibraryItems) }}}function run({{{ MAIN_READS_PARAMS ? 'args = programArgs' : '' }}}) {
+#if ASSERTIONS
+  assert(!calledRun);
+  calledRun = true;
+#endif
+
+#if PTHREADS || WASM_WORKERS
+  if ({{{ ENVIRONMENT_IS_WORKER_THREAD() }}}) {
+    initRuntime();
+    return;
+  }
+#endif
+
+#if STACK_OVERFLOW_CHECK
+  stackCheckInit();
+#endif
+
+  preRun();
+
+#if '$runDependencies' in addedLibraryItems
+  if (runDependencies) {
+#if RUNTIME_DEBUG
+    dbg('run: waiting on runDependencies');
+#endif
+    await resolveRunDependencies();
+  }
+#endif
+
+#if expectToReceiveOnModule('setStatus')
+  var setStatus = Module['setStatus'];
+  if (setStatus) {
+    setStatus('Running...');
+    // Yield to the event loop to allow the browser to paint "Running..."
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    // Then we want to clear the status text, but only after the rest of this function runs.
+    setTimeout(setStatus, 1, '');
+  }
+#endif
+
+  if (ABORT) return;
+
+  initRuntime();
+
+#if HAS_MAIN
+  <<< ATMAINS >>>
+#endif
+
+#if expectToReceiveOnModule('onRuntimeInitialized')
+  Module['onRuntimeInitialized']?.();
+#if ASSERTIONS
+  consumedModuleProp('onRuntimeInitialized');
+#endif
+#endif
+
+#if HAS_MAIN
+  var noInitialRun = {{{ makeModuleReceiveExpr('noInitialRun', !INVOKE_RUN) }}};
+#if MAIN_READS_PARAMS
+  if (!noInitialRun) {{{ awaitIf(ASYNCIFY == 2) }}}callMain(args);
+#else
+  if (!noInitialRun) {{{ awaitIf(ASYNCIFY == 2) }}}callMain();
+#endif
+#elif ASSERTIONS
+  assert(!Module['_main'], 'compiled without a main, but one is present. if you added it from JS, use Module["onRuntimeInitialized"]');
+#endif // HAS_MAIN
+
+  postRun();
+}
+
+#if ASSERTIONS
+#if EXIT_RUNTIME == 0
+function checkUnflushedContent() {
+  // Compiler settings do not allow exiting the runtime, so flushing
+  // the streams is not possible. but in ASSERTIONS mode we check
+  // if there was something to flush, and if so tell the user they
+  // should request that the runtime be exitable.
+  // Normally we would not even include flush() at all, but in ASSERTIONS
+  // builds we do so just for this check, and here we see if there is any
+  // content to flush, that is, we check if there would have been
+  // something a non-ASSERTIONS build would have not seen.
+  // How we flush the streams depends on whether we are in SYSCALLS_REQUIRE_FILESYSTEM=0
+  // mode (which has its own special function for this; otherwise, all
+  // the code is inside libc)
+  var oldOut = out;
+  var oldErr = err;
+  var has = false;
+  out = err = (x) => {
+    has = true;
+  }
+  try { // it doesn't matter if it fails
+#if SYSCALLS_REQUIRE_FILESYSTEM == 0 && '$flush_NO_FILESYSTEM' in addedLibraryItems
+    flush_NO_FILESYSTEM();
+#elif WASMFS && hasExportedSymbol('wasmfs_flush')
+    // In WasmFS we must also flush the WasmFS internal buffers, for this check
+    // to work.
+    _wasmfs_flush();
+#elif hasExportedSymbol('fflush')
+    _fflush(0);
+#endif
+#if '$FS' in addedLibraryItems && '$TTY' in addedLibraryItems
+    // also flush in the JS FS layer
+    for (var name of ['stdout', 'stderr']) {
+      var info = FS.analyzePath('/dev/' + name);
+      if (!info) return;
+      var stream = info.object;
+      var rdev = stream.rdev;
+      var tty = TTY.ttys[rdev];
+      if (tty?.output?.length) {
+        has = true;
+      }
+    }
+#endif
+  } catch(e) {}
+  out = oldOut;
+  err = oldErr;
+  if (has) {
+    warnOnce('stdio streams had content in them that was not flushed. you should set EXIT_RUNTIME to 1 (see the Emscripten FAQ), or make sure to emit a newline when you printf etc.');
+#if FILESYSTEM == 0 || SYSCALLS_REQUIRE_FILESYSTEM == 0
+    warnOnce('(this may also be due to not including full filesystem support - try building with -sFORCE_FILESYSTEM)');
+#endif
+  }
+}
+#endif // EXIT_RUNTIME
+#endif // ASSERTIONS
+
+var wasmExports;
+#if SPLIT_MODULE
+var wasmRawExports;
+#endif
+
+#if MODULARIZE == 'instance'
+// In MODULARIZE=instance mode we delay most of the initialization work until
+// the `init` function is called.
+#if ASSERTIONS
+var initCalled = false;
+#endif
+#if AUTO_INIT && !WASM_ESM_INTEGRATION
+// In AUTO_INIT mode `init` is not exported; we self-initialize below.
+async function init() {
+#else
+export default async function init(moduleArg = {}) {
+#endif
+#if ASSERTIONS
+  assert(!initCalled);
+  initCalled = true;
+#endif
+#if !AUTO_INIT || WASM_ESM_INTEGRATION
+  Object.assign(Module, moduleArg);
+#endif
+  processModuleArgs();
+#if WASM_ESM_INTEGRATION
+#if PTHREADS
+  registerTLSInit(__emscripten_tls_init);
+#endif
+#if !IMPORTED_MEMORY
+  updateMemoryViews();
+#endif
+#if DYNCALLS && '$dynCalls' in addedLibraryItems
+  assignDynCalls();
+#endif
+#else
+  wasmExports = await createWasm();
+#endif
+  await run();
+}
+
+#if AUTO_INIT && !WASM_ESM_INTEGRATION
+#if PTHREADS || WASM_WORKERS
+// Worker threads self-init on demand from the CMD_LOAD handler (see
+// runtime_pthread.js), so only the main thread inits here.
+if ({{{ ENVIRONMENT_IS_MAIN_THREAD() }}})
+#endif
+await init();
+
+#else
+
+#if ENVIRONMENT_MAY_BE_NODE
+// When run as the main script under node we run `init` immediately.
+if (ENVIRONMENT_IS_NODE
+#if PTHREADS || WASM_WORKERS
+&& !{{{ ENVIRONMENT_IS_WORKER_THREAD() }}}
+#endif
+)
+{
+  const url = await import('node:url');
+  const isMainModule = url.pathToFileURL(process.argv[1]).href === import.meta.url;
+  if (isMainModule) await init();
+}
+#endif
+
+#if ENVIRONMENT_MAY_BE_SHELL
+if (ENVIRONMENT_IS_SHELL) {
+  // When run in a shell we run `init` immediately.
+  await init();
+}
+#endif
+
+#endif
+
+#else // MODULARIZE == instance
+
+#if WASM_WORKERS || PTHREADS
+if ({{{ ENVIRONMENT_IS_MAIN_THREAD() }}}) {
+// Call createWasm on startup if we are the main thread.
+// Worker threads call this once they receive the module via postMessage
+#endif
+
+#if !MODULARIZE && WASM_ASYNC_COMPILATION
+// With async instantation wasmExports is assigned asynchronously when the
+// instance is received.
+createWasm().then(() => run());
+#else
+// In modularize mode the generated code is within a factory function so we
+// can use await here (since it's not top-level-await).
+wasmExports = {{{ awaitIf(MODULARIZE && WASM_ASYNC_COMPILATION) }}}createWasm();
+{{{ awaitIf(MODULARIZE) }}}run();
+#endif
+
+#if WASM_WORKERS || PTHREADS
+}
+#endif
+
+#endif // MODULARIZE != instance

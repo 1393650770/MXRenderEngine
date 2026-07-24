@@ -1,0 +1,5 @@
+NODE_JS = '$CFGDIR/node/22.16.0_64bit/bin/node.exe'
+PYTHON = '$CFGDIR/python/3.13.3_64bit/python.exe'
+LLVM_ROOT = '$CFGDIR/upstream/bin'
+BINARYEN_ROOT = '$CFGDIR/upstream'
+EMSCRIPTEN_ROOT = '$CFGDIR/upstream/emscripten'

@@ -1,0 +1,1 @@
+6.0.4|D:\Project\GameDevelop\MyRenderer\src\ThirdParty\emsdk/upstream/bin

@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+# Copyright 2014 The Emscripten Authors.  All rights reserved.
+# Emscripten is available under two separate licenses, the MIT license and the
+# University of Illinois/NCSA Open Source License.  Both these licenses can be
+# found in the LICENSE file.
+
+"""Tool to manage building of system libraries and ports.
+
+In general emcc will build them automatically on demand, so you do not
+strictly need to use this tool, but it gives you more control over the
+process (in particular, if emcc does this automatically, and you are
+running multiple build commands in parallel, confusion can occur).
+"""
+
+import argparse
+import fnmatch
+import logging
+import os
+import sys
+import time
+from contextlib import contextmanager
+
+from tools import cache, ports, shared, system_libs, utils
+from tools.settings import settings
+from tools.system_libs import USE_NINJA
+
+# Minimal subset of targets used by CI systems to build enough to be useful
+MINIMAL_TASKS = [
+    'libclang_rt.builtins',
+    'libclang_rt.builtins-mt',
+    'libclang_rt.builtins-legacysjlj',
+    'libclang_rt.builtins-wasmsjlj',
+    'libclang_rt.builtins-ww',
+    'libc',
+    'libc-debug',
+    'libc-mt-debug',
+    'libc-ww-debug',
+    'libc_optz',
+    'libc_optz-debug',
+    'libc++abi',
+    'libc++abi-legacyexcept',
+    'libc++abi-wasmexcept',
+    'libc++abi-noexcept',
+    'libc++abi-debug',
+    'libc++abi-debug-legacyexcept',
+    'libc++abi-debug-wasmexcept',
+    'libc++abi-debug-noexcept',
+    'libc++abi-debug-mt-noexcept',
+    'libc++abi-debug-ww-noexcept',
+    'libc++',
+    'libc++-legacyexcept',
+    'libc++-wasmexcept',
+    'libc++-noexcept',
+    'libc++-ww-noexcept',
+    'libc++-debug',
+    'libc++-debug-wasmexcept',
+    'libc++-debug-legacyexcept',
+    'libc++-debug-noexcept',
+    'libc++-debug-mt-noexcept',
+    'libc++-debug-ww-noexcept',
+    'libal',
+    'libdlmalloc',
+    'libdlmalloc-tracing',
+    'libdlmalloc-debug',
+    'libdlmalloc-mt-debug',
+    'libdlmalloc-ww',
+    'libdlmalloc-ww-debug',
+    'libembind',
+    'libembind-rtti',
+    'libembind-mt-rtti',
+    'libemmalloc',
+    'libemmalloc-debug',
+    'libemmalloc-memvalidate',
+    'libemmalloc-verbose',
+    'libemmalloc-memvalidate-verbose',
+    'libmimalloc',
+    'libmimalloc-mt',
+    'libGL',
+    'libGL-getprocaddr',
+    'libGL-mt-getprocaddr',
+    'libGL-emu-getprocaddr',
+    'libGL-emu-webgl2-ofb-getprocaddr',
+    'libGL-webgl2-ofb-getprocaddr',
+    'libGL-webgl2-ofb-full_es3-getprocaddr',
+    'libGL-ww-getprocaddr',
+    'libhtml5',
+    'libsockets',
+    'libsockets-mt',
+    'libsockets-ww',
+    'libstubs',
+    'libstubs-debug',
+    'libstandalonewasm-nocatch',
+    'crt1',
+    'crt1_proxy_main',
+    'crtbegin-mt',
+    'libunwind-legacyexcept',
+    'libunwind-wasmexcept',
+    'libnoexit',
+    'bullet',
+    'libstb_image',
+    'libwasmfs_no_fs',
+    'libwasmfs-debug',
+    'libwasm_workers-debug',
+]
+
+# Additional tasks on top of MINIMAL_TASKS that are necessary for PIC testing on
+# CI (which has slightly more tests than other modes that want to use MINIMAL)
+MINIMAL_PIC_TASKS = [
+    *MINIMAL_TASKS,
+    'libc-mt',
+    'libc_optz-mt',
+    'libc_optz-mt-debug',
+    'libc++abi-mt',
+    'libc++abi-mt-noexcept',
+    'libc++abi-debug-mt',
+    'libc++-mt',
+    'libc++-mt-noexcept',
+    'libc++-debug-mt',
+    'libdlmalloc-mt',
+    'libGL-emu',
+    'libGL-emu-webgl2-getprocaddr',
+    'libGL-mt-emu',
+    'libGL-mt-emu-webgl2-getprocaddr',
+    'libGL-mt-emu-webgl2-ofb-getprocaddr',
+    'libsockets_proxy',
+    'libclang_rt.sanitizer_common',
+    'libclang_rt.ubsan',
+    'libfetch',
+    'libfetch-mt',
+    'libwasmfs',
+    'giflib',
+    'sdl2',
+    'sdl2_gfx',
+    'sdl3',
+]
+
+PORTS = sorted(list(ports.ports_by_name.keys()) + list(ports.port_variants.keys()))
+
+temp_files = shared.get_temp_files()
+logger = logging.getLogger('embuilder')
+legacy_prefixes = {
+  'libgl': 'libGL',
+}
+
+
+def get_help():
+  all_tasks = get_all_tasks()
+  all_tasks.sort()
+  return '''
+Available targets:
+
+  build / clear
+        %s
+
+Issuing 'embuilder build ALL' causes each task to be built.
+''' % '\n        '.join(all_tasks)
+
+
+@contextmanager
+def get_port_variant(name):
+  if name in ports.port_variants:
+    name, extra_settings = ports.port_variants[name]
+    old_settings = settings.dict().copy()
+    for key, value in extra_settings.items():
+      setattr(settings, key, value)
+  else:
+    old_settings = None
+
+  try:
+    yield name
+  finally:
+    if old_settings:
+      settings.dict().update(old_settings)
+
+
+def clear_port(port_name):
+  with get_port_variant(port_name) as port_name:
+    ports.clear_port(port_name, settings)
+
+
+def build_port(port_name):
+  with get_port_variant(port_name) as port_name_base:
+    ports.build_port(port_name_base, settings)
+
+
+def get_system_tasks():
+  system_libraries = system_libs.Library.get_all_variations()
+  system_tasks = list(system_libraries.keys())
+  return system_libraries, system_tasks
+
+
+def get_all_tasks():
+  return get_system_tasks()[1] + PORTS
+
+
+def handle_port_error(target, message):
+  utils.exit_with_error(f'error building port `{target}` | {message}')
+
+
+def main():
+  all_build_start_time = time.time()
+
+  parser = argparse.ArgumentParser(description=__doc__,
+                                   formatter_class=argparse.RawDescriptionHelpFormatter,
+                                   epilog=get_help())
+  parser.add_argument('--lto', action='store_const', const='full', help='build bitcode object for LTO')
+  parser.add_argument('--lto=thin', dest='lto', action='store_const', const='thin', help='build bitcode object for ThinLTO')
+  parser.add_argument('--pic', action='store_true',
+                      help='build relocatable objects suitable for dynamic linking')
+  parser.add_argument('-f', '--force', action='store_true',
+                      help='force rebuild of target (by removing it first)')
+  parser.add_argument('-v', '--verbose', action='store_true',
+                      help='show build commands')
+  parser.add_argument('--wasm64', action='store_true',
+                      help='use wasm64 architecture')
+  parser.add_argument('operation', choices=['build', 'clear', 'rebuild'])
+  parser.add_argument('targets', nargs='*', help='see below')
+  args = parser.parse_args()
+
+  if args.operation != 'rebuild' and len(args.targets) == 0:
+    utils.exit_with_error('no build targets specified')
+
+  if args.operation == 'rebuild' and not USE_NINJA:
+    utils.exit_with_error('"rebuild" operation is only valid when using Ninja')
+
+  # process flags
+
+  # Check sanity so that if settings file has changed, the cache is cleared here.
+  # Otherwise, the cache will clear in an emcc process, which is invoked while building
+  # a system library into the cache, causing trouble.
+  cache.setup()
+  shared.check_sanity()
+
+  if args.lto:
+    settings.LTO = args.lto
+
+  if args.verbose:
+    shared.PRINT_SUBPROCS = True
+
+  if args.pic:
+    settings.MAIN_MODULE = 1
+    # Note: we have to filter out the `-ww` libraries here because wasm workers don't
+    # support dynamic linking.
+    global MINIMAL_TASKS
+    global MINIMAL_PIC_TASKS
+    MINIMAL_TASKS = [t for t in MINIMAL_TASKS if '-ww' not in t]
+    MINIMAL_PIC_TASKS = [t for t in MINIMAL_PIC_TASKS if '-ww' not in t]
+
+  if args.wasm64:
+    settings.MEMORY64 = 1
+
+  do_build = args.operation == 'build'
+  do_clear = args.operation == 'clear'
+  if args.force:
+    do_clear = True
+
+  system_libraries, system_tasks = get_system_tasks()
+
+  # process tasks
+  auto_tasks = False
+  task_targets = dict.fromkeys(args.targets) # use dict to keep targets order
+
+  # substitute
+  predefined_tasks = {
+    'SYSTEM': system_tasks,
+    'USER': PORTS,
+    'MINIMAL': MINIMAL_TASKS,
+    'MINIMAL_PIC': MINIMAL_PIC_TASKS,
+    'ALL': system_tasks + PORTS,
+  }
+  for name, tasks in predefined_tasks.items():
+    if name in task_targets:
+      task_targets[name] = tasks
+      auto_tasks = True
+
+  # flatten tasks
+  tasks = []
+  for name, targets in task_targets.items():
+    if targets is None:
+      # Use target name as task
+      if '*' in name:
+        tasks.extend(fnmatch.filter(get_all_tasks(), name))
+      else:
+        tasks.append(name)
+    else:
+      # There are some ports that we don't want to build as part
+      # of ALL since they are not well tested or widely used:
+      if 'cocos2d' in targets:
+        targets.remove('cocos2d')
+
+      # Use targets from predefined_tasks
+      tasks.extend(targets)
+
+  if auto_tasks:
+    print('Building targets: %s' % ' '.join(tasks))
+
+  if USE_NINJA:
+    os.environ['EMBUILDER_PORT_BUILD_DEFERRED'] = '1'
+
+  for what in tasks:
+    for old, new in legacy_prefixes.items():
+      if what.startswith(old):
+        what = what.replace(old, new)
+    if do_build:
+      logger.info('building ' + what)
+    else:
+      logger.info('clearing ' + what)
+    start_time = time.time()
+    if what in system_libraries:
+      library = system_libraries[what]
+      if do_clear:
+        library.erase()
+      if do_build:
+        if USE_NINJA:
+          library.generate()
+        else:
+          library.build()
+    elif what == 'sysroot':
+      if do_clear:
+        cache.erase_file('sysroot_install.stamp')
+      if do_build:
+        system_libs.ensure_sysroot()
+    elif what in PORTS:
+      if do_clear:
+        clear_port(what)
+      if do_build:
+        build_port(what)
+    elif ':' in what or what.endswith('.py'):
+      name = ports.handle_use_port_arg(settings, what, lambda message: handle_port_error(what, message))
+      if do_clear:
+        clear_port(name)
+      if do_build:
+        build_port(name)
+    else:
+      logger.error('unfamiliar build target: ' + what)
+      return 1
+
+    time_taken = time.time() - start_time
+    logger.info('...success. Took %s(%.2fs)' % (('%02d:%02d mins ' % (time_taken // 60, time_taken % 60) if time_taken >= 60 else ''), time_taken))
+
+  if USE_NINJA and args.operation != 'clear':
+    system_libs.build_deferred()
+
+  if len(tasks) > 1 or USE_NINJA:
+    all_build_time_taken = time.time() - all_build_start_time
+    logger.info('Built %d targets in %s(%.2fs)' % (len(tasks), ('%02d:%02d mins ' % (all_build_time_taken // 60, all_build_time_taken % 60) if all_build_time_taken >= 60 else ''), all_build_time_taken))
+
+  return 0
+
+
+if __name__ == '__main__':
+  try:
+    sys.exit(main())
+  except KeyboardInterrupt:
+    logger.warning("KeyboardInterrupt")
+    sys.exit(1)

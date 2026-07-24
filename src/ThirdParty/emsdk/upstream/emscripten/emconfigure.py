@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+# Copyright 2016 The Emscripten Authors.  All rights reserved.
+# Emscripten is available under two separate licenses, the MIT license and the
+# University of Illinois/NCSA Open Source License.  Both these licenses can be
+# found in the LICENSE file.
+
+"""Helper for running ./configure.
+
+This script runs ./configure (or cmake, etc.) for you,
+setting the environment variables to use emcc and so forth.
+
+Usage:
+
+  emconfigure ./configure [FLAGS]
+
+You can also use this for cmake and other configure-like
+stages. What happens is that all compilations done during
+this command are to native code, not JS, so that configure
+tests will work properly.
+"""
+
+import os
+import shlex
+import sys
+
+from tools import building, shared
+
+
+#
+# Main run() function
+#
+def run():
+  if len(sys.argv) < 2 or sys.argv[1] in {'--version', '--help'}:
+    print('''\
+emconfigure is a helper for configure, setting various environment
+variables so that emcc etc. are used. Typical usage:
+
+  emconfigure ./configure [FLAGS]
+
+(but you can run any command instead of configure)''', file=sys.stderr)
+    return 1
+
+  args = sys.argv[1:]
+
+  if 'cmake' in args:
+    print('error: use `emcmake` rather than `emconfigure` for cmake projects', file=sys.stderr)
+    return 1
+
+  env = building.get_building_env()
+  env['EMMAKEN_JUST_CONFIGURE'] = '1'
+  print(f'emconfigure: {shlex.join(args)} in directory {os.getcwd()}', file=sys.stderr)
+  os.environ.update(env)
+  shared.exec_process(args)
+
+
+if __name__ == '__main__':
+  sys.exit(run())
