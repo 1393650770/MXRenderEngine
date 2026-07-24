@@ -1,6 +1,8 @@
 # MyRenderer
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Language](https://img.shields.io/badge/language-C++-blue.svg)](https://isocpp.org/)
+[![README](https://img.shields.io/badge/README-EN-red.svg)](README.md)
+[![README](https://img.shields.io/badge/README-中文-blue.svg)](README_CN.md)
 
 MyRenderer (MXRender) is a real-time rendering engine written in **C++20** on top of **Vulkan**, built with **xmake**. It features a declarative **RenderGraph** with a visual node editor, **bindless** rendering, **GPU neural network** training/inference via compute shaders, and a code-generation based **reflection** system.
 
@@ -15,6 +17,8 @@ Strict one-way layering:
 - **Runtime never includes Editor headers**
 - **Render layer never includes Vulkan headers** — all GPU work goes through the RHI abstraction
 - **Editor headers never include Vulkan headers** (the ImGui backend .cpp is the only exception)
+- **UI layer never includes Vulkan headers** — scissor/blend/barrier all go through `RHI::CommandList`; missing RHI methods are added to the abstract interface first
+- **UI abstract layer never includes backend headers** (`UIManager.h`, `UISystem.h`, `UIDataModelBinder.h`, `UIRenderer.h` are RmlUi/GLFW-free)
 
 ## How to build
 
@@ -166,6 +170,14 @@ Vulkan 1.3 `vkCmdBeginRendering` path with automatic fallback to legacy render p
 SPIRV-Reflect drives descriptor set layouts and by-name resource binding (`srb->SetResource("name", ...)`)
  - [x] Staging buffer manager
 Pooled staging buffers with fence-based deferred reclamation for texture/buffer uploads
+	 - [x] Multi-backend UI framework
+	`UISystem` abstract backend → `RmlUISystem` (RmlUi) with pluggable architecture; `UIManager` singleton facade (holds `UISystem*`); `UIDataModelBinder` abstract data binding (zero `void*`, zero RmlUi type leaks); `UIRenderer` slim abstract renderer (3 virtual methods); `UIInputBridge` abstract input routing; RTTR-based declarative `UIWidget` framework with `UI_BIND` annotations, MetaParser codegen, and `UIWidgetManager` lifecycle
+	 - [x] Tessellation support
+	`PatchList` topology + hull/domain shader stages in PSO desc; `.tesc/.tese` shader files
+	 - [x] Indirect draw / dispatch
+	`DrawIndirect` / `DrawIndexedIndirect` / `DispatchIndirect` on CommandList with `Storage|Indirect` buffer support for GPU-written draw args
+	 - [x] Storage images (UAV textures)
+	`ENUM_TYPE_STORAGE` textures with `TransitionTextureState(UnorderedAccess)` / `ResourceBarrier`; `image2D`/`uimage2D` in GLSL; verified `imageAtomicMin/Add` (R32U format)
  - [ ] Virtual Texture
 Quadtree page layout prototype (`src/Runtime/Render/Core/VirtualTexture/`), still WIP
  - [ ] GPU-Driven rendering
@@ -197,6 +209,11 @@ The `Editor` target is an ImGui (docking + multi-viewport) application centered 
 | `RendererSample-NNE_MNIST_CNN` | MNIST-style CNN: Conv2D + BatchNorm + Dropout + AdamW, model save/load (synthetic data) |
 | `RendererSample-NNE_Transformer` | Tiny Transformer: MultiHeadAttention + LayerNorm + Residual + GELU + cosine LR schedule |
 | `RendererSample-Fluid2D` | Interactive 2D stable-fluids sim (mouse splat force/dye, Jacobi pressure solve) with blurred metaball ink-wash stylized rendering, all on storage buffers |
+| `RendererSample-Fluid3D` | GPU FLIP water: MAC-grid pressure projection, fixed-point-atomic P2G, GPU free-list particle recycling, screen-space water rendering with foam; 6 RDG passes, retained storage-image textures with manual layout transitions |
+| `RendererSample-Ocean` | FFT spectral waves: compute IFFT chain, storage-buffer export to graphics PSO, vertex-pulling grid |
+| `RendererSample-VolumetricCloud` | 3D-texture reference: Hillaire sky LUTs + Nubis-style raymarched clouds; one-shot compute bake of tileable 3D Perlin-Worley noise into `image3D`, per-frame sky-view LUT + half-res cloud march, `sampler3D` reads in compute and fragment stages |
+| `RendererSample-Mesh` | Vertex-input reference: MeshAsset obj load → `Vertex|Dynamic` VB/IB, `vertex_input_layout` PSO, OrbitCameraController + SceneView, DrawIndexed vs DrawIndexedIndirect toggle |
+| `RendererSample-RmlUI` | RmlUI game UI demo: HP bar, score, timer with `UI_BIND` annotations; multi-backend `UISystem` architecture; `UIDataModelBinder` abstract binding (zero `void*`, zero Rml types in Sample layer) |
 | `RendererSample-VirtualTexture` | Virtual texture quadtree page-layout prototype |
 
 Run any sample from its output directory (shaders are loaded via relative `Shader/...` paths), e.g.:
@@ -217,6 +234,9 @@ src/
     Application/        # Window / main loop (GLFW)
     Asset/              # Mesh / texture / material assets
     Platform/           # Platform abstractions
+	    UI/                 # Multi-backend UI framework (UISystem, UIManager, RmlUI backend)
+	      Widget/           #   RTTR-based declarative widget framework (UIWidgetManager)
+	      RmlUI/            #   RmlUI concrete backend (RmlUISystem, RmlUIRenderer, RmlDataModelBinder)
     GenCode/            # Generated code (flatbuffers schemas, embedded SPIR-V)
   Editor/               # Editor application
     EditorRender/       # EditorRenderPipeline + EditorUI (ImGui)
@@ -232,4 +252,4 @@ template/               # Mustache templates for reflection codegen
 
 Fetched via xmake packages: `vulkansdk`, `glfw 3.4`, `glm`, `imgui 1.89.9-docking`, `assimp`, `tinyobjloader`, `gli`, `lz4`, `nlohmann_json`, `rttr`, `boost 1.84`, `flatbuffers 1.12`, `glslang`.
 
-Vendored in-tree: `TaskScheduler` (multithreaded task scheduler), `SPIRV-Reflect`, `stb_image`, `VulkanMemoryAllocator`, `imgui-node-editor` (ax::NodeEditor), `libclang` (for MetaParser).
+Vendored in-tree: `RmlUi` (HTML/CSS UI middleware), `TaskScheduler` (multithreaded task scheduler), `SPIRV-Reflect`, `stb_image`, `VulkanMemoryAllocator`, `imgui-node-editor` (ax::NodeEditor), `libclang` (for MetaParser).
