@@ -38,7 +38,7 @@ public:
 	VIRTUAL bool METHOD(IsMouseInteracting)() CONST OVERRIDE FINAL;
 
 	// --- Backend-specific ---
-	/// Set the RmlUI context.  Called by RmlUIManager during Init.
+	/// Set the RmlUI context.  Called by RmlUISystem during Init.
 	/// Not part of the UIInputBridge interface — RmlUI-internal only.
 	void METHOD(SetContext)(Rml::Context* context);
 

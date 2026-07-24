@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+-- Code development must prioritize extensibility and architecture. Always follow design patterns!!! Always follow design patterns!!! Avoid tight coupling.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Overview
@@ -18,6 +20,14 @@ src/
     Application/        # Window management (GLFW)
     Asset/              # Asset loading (mesh, texture, material)
     Platform/           # Platform abstractions
+    UI/                 # UI framework — multi-backend (RmlUI, future ImGui)
+      UISystem.h        #   Abstract backend base (virtual, not pure virtual)
+      UIDataModelBinder.h # Abstract data binding (zero void*, zero RmlUi)
+      UIManager.h       #   Singleton facade (holds UISystem*)
+      UIRenderer.h      #   Abstract renderer (3 virtual methods)
+      UIInputBridge.h   #   Abstract input bridge
+      RmlUI/            #   RmlUI concrete backend
+      Widget/           #   RTTR-based declarative widget framework
     GenCode/            # Generated code (flatbuffers, shader SPIR-V)
   Editor/               # Editor application
     Editor.cpp          # Entry point
@@ -43,6 +53,8 @@ Editor.exe  ──depends──>  Runtime.lib  ──includes──>  ThirdParty
 - **Runtime NEVER includes Editor headers** (src/Editor/ not in Runtime include path)
 - **Render layer NEVER includes Vulkan headers** (all VK ops through RHI abstraction)
 - **Editor headers NEVER include Vulkan headers** (EditorUI.cpp is the only exception, for ImGui backend)
+- **UI layer NEVER includes Vulkan headers** (all GPU ops through RHI::CommandList; scissor/blend/etc. must be on the RHI abstract interface, not via VK_* casts)
+- **UI abstract layer NEVER includes RmlUi/GLFW headers** (`UIManager.h`, `UISystem.h`, `UIDataModelBinder.h`, `UIRenderer.h` are backend-agnostic)
 
 ## Build System
 
@@ -141,6 +153,14 @@ There is no input system: poll GLFW directly (`glfwGetMouseButton` / `glfwGetCur
 | Graph validator | `src/Editor/UI/RenderGraphEditor/Services/GraphValidator.h` |
 | Command system | `src/Editor/UI/RenderGraphEditor/Commands/CommandHistory.h` |
 | Template library | `src/Editor/UI/RenderGraphEditor/Templates/TemplateLibrary.h` |
+| UI abstract backend | `src/Runtime/UI/UISystem.h` |
+| UI abstract binder | `src/Runtime/UI/UIDataModelBinder.h` |
+| UI abstract renderer | `src/Runtime/UI/UIRenderer.h` |
+| UIManager (facade) | `src/Runtime/UI/UIManager.h` |
+| RmlUI backend | `src/Runtime/UI/RmlUI/RmlUISystem.h` |
+| RmlUI renderer | `src/Runtime/UI/RmlUI/RmlUIRenderer.h` |
+| RmlUI data binder | `src/Runtime/UI/RmlUI/RmlDataModelBinder.h` |
+| UI binding traits | `src/Runtime/UI/Widget/UIWidgetBinding.h` |
 
 ## Layering Verification Checklist
 
@@ -152,6 +172,12 @@ grep -r '#include.*vulkan' src/Runtime/Render/ | wc -l  # must be 0
 grep -r '#include.*Editor' src/Runtime/ | wc -l         # must be 0
 # No VK_ includes in Render layer
 grep -r '#include.*VK_' src/Runtime/Render/ | wc -l     # must be 0
+# No VK_ includes in UI layer
+grep -r '#include.*RHI/Vulkan' src/Runtime/UI/ | wc -l  # must be 0
+# No RmlUi includes in UI abstract layer
+grep -r '#include.*<RmlUi' src/Runtime/UI/UISystem.h src/Runtime/UI/UIDataModelBinder.h src/Runtime/UI/UIManager.h src/Runtime/UI/UIManager.cpp src/Runtime/UI/UIRenderer.h | wc -l  # must be 0
+# No GLFW includes in UI layer (EditorUI.cpp is the only exception)
+grep -r '#include.*GLFW\|glfwGetTime' src/Runtime/UI/ | wc -l  # must be 0
 ```
 
 ## Android Cross-Compile & APK Build

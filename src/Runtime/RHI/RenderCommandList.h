@@ -310,6 +310,10 @@ public:
 	VIRTUAL void METHOD(BeginUI)() PURE;
 	VIRTUAL void METHOD(EndUI)() PURE;
 
+	// Dynamic scissor state (used by UI renderers for per-draw clipping)
+	VIRTUAL void METHOD(SetScissorEnable)(bool enable) PURE;
+	VIRTUAL void METHOD(SetScissor)(Int x, Int y, UInt32 w, UInt32 h) PURE;
+
 	//  三线程模式：拆分 UI 阶段
 	// Logic 线程调用（GLFW input → ImGui NewFrame）
 	VIRTUAL void METHOD(BeginUI_Logic)() {}

@@ -2,12 +2,12 @@
 
 // Zero RmlUI backend includes.  Only generic UI + generated Widget headers.
 #include "UI/UIManager.h"
-#include "UI/UIInputBridge.h"
 #include "UI/UIRenderer.h"
+#include "UI/UIInputBridge.h"
 #include "UI/UIRenderPass.h"
+#include "UI/RmlUI/RmlUISystem.h"     // for new RmlUISystem — only line that names the backend
 
-// Generated UIWidget bindings — replaces old RmlUI/AllRmlDataModel.h.
-// This includes <RmlUi/...> internally; application code does NOT.
+// Generated UIWidget bindings — zero RmlUi includes (uses UIDataModelBinder)
 #include "RmlUI/RmlUIDemo.UIBinding.Gen.h"
 
 #include "RHI/RenderViewport.h"
@@ -23,7 +23,7 @@ using MXRender::UI::Widget::UIWidgetBindingTraits;
 RmlUIDemoApp::RmlUIDemoApp() {}
 RmlUIDemoApp::~RmlUIDemoApp() {}
 
-void RmlUIDemoApp::OnHeal(Rml::DataModelHandle, Rml::Event&)
+void RmlUIDemoApp::OnHeal()
 {
 	m_hp = (m_hp + 10);
 	if (m_hp > 100) m_hp = 100;
@@ -35,25 +35,25 @@ void RmlUIDemoApp::OnInitScene()
 {
 	std::cout << "[RmlUIDemo] OnInitScene" << std::endl;
 
-	UIManager::Create(viewport);
-	UIManager::Get().EnableDebugger(true);
+	auto* rml_system = new MXRender::UI::RmlUI::RmlUISystem();
+	rml_system->Init(viewport);
+	UIManager::Create(rml_system);
 
-	UIManager::Get().LoadFontFace("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-latin.ttf");
-	UIManager::Get().LoadFontFace("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-zh_cn.ttf");
+	UIManager::Get().LoadFont("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-latin.ttf");
+	UIManager::Get().LoadFont("Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-zh_cn.ttf");
 
 	m_hud_model = UIManager::Get().CreateDataModel("hud");
 	if (m_hud_model.IsValid())
 	{
 		// Auto-generated BindDataModel from UI_BIND_* annotations.
 		// Handles all fields (OneWay, TwoWay) and event callbacks.
-		void* ctor_opaque = UIManager::Get().GetModelConstructor(m_hud_model);
-		UIWidgetBindingTraits<RmlUIDemoApp>::BindDataModel(ctor_opaque, this);
+		UIManager::Get().BindDataModel<UIWidgetBindingTraits<RmlUIDemoApp>>(m_hud_model, this);
 	}
 
-	m_hud_doc = UIManager::Get().LoadDocument("RmlUI/DemoPanel.rml");
+	m_hud_doc = UIManager::Get().LoadPanel("RmlUI/DemoPanel.rml");
 	if (m_hud_doc.IsValid())
 	{
-		UIManager::Get().ShowDocument(m_hud_doc);
+		UIManager::Get().ShowPanel(m_hud_doc);
 		std::cout << "[RmlUIDemo] Document loaded and shown." << std::endl;
 	}
 	else

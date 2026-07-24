@@ -25,8 +25,8 @@ void UIWidget::Initialize(UIWidgetManager* manager)
 	CreateDataModel();
 
 	// Step 2: Bind C++ members to the model (generated/manual)
-	auto* ctor_opaque = UIManager::Get().GetModelConstructor(m_model_handle);
-	RegisterBindings(ctor_opaque);
+	auto* binder = UIManager::Get().GetModelBinder(m_model_handle);
+	RegisterBindings(binder);
 
 	// Step 3: Build the diff tracking table
 	PopulateBindings();
@@ -90,11 +90,11 @@ void UIWidget::CreateDataModel()
 	m_model_handle = UIManager::Get().CreateDataModel(m_model_name);
 }
 
-void UIWidget::RegisterBindings(void* ctor_opaque)
+void UIWidget::RegisterBindings(UI::UIDataModelBinder* binder)
 {
-	// Phase 1: default is no-op — derived class overrides or
+	// Default is no-op — derived class overrides or
 	// uses UIWidgetBindingTraits<T>::BindDataModel via the factory pointer.
-	(void)ctor_opaque;
+	(void)binder;
 }
 
 void UIWidget::PopulateBindings()

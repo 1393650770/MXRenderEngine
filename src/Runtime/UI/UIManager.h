@@ -3,16 +3,18 @@
 #define _UIMANAGER_
 
 #include "Core/ConstDefine.h"
-#include "UI/UIHandleTypes.h"       // UIModelHandle, UIDocHandle
+#include "UI/UIHandleTypes.h"
+#include "UI/UISystem.h"       // for UISystem* — abstract base, zero backend deps
+#include <functional>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)
-class Viewport;
 class CommandList;
 MYRENDERER_END_NAMESPACE
 MYRENDERER_BEGIN_NAMESPACE(UI)
 class UIRenderer;
 class UIInputBridge;
+class UIDataModelBinder;
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE
 
@@ -22,30 +24,28 @@ MYRENDERER_BEGIN_NAMESPACE(UI)
 /**
  * Global UI Manager — backend-agnostic singleton facade.
  *
- * Application layer uses ONLY this class.  The concrete backend (RmlUI)
- * is hidden behind a Pimpl — no backend types leak through this header.
- *
- * For event callback binding, use generated Bind*() functions or the
- * MXWidget framework.  Manual callbacks can include <RmlUi/Core/...> and
- * call GetModelConstructor() which returns an opaque void* pointer.
+ * Application layer uses ONLY this class.  The concrete backend (RmlUISystem,
+ * future ImGuiSystem, etc.) is passed via Create() and stored as a UISystem*.
  *
  * Usage:
- *   UIManager::Create(viewport);
+ *   auto* ui = new RmlUI::RmlUISystem();
+ *   UIManager::Create(ui);
  *   auto h = UIManager::Get().CreateDataModel("hud");
- *   auto doc = UIManager::Get().LoadDocument("p.rml");
- *   UIManager::Get().ShowDocument(doc);
- *   // per frame: ProcessInput() → Update(dt) → Render(cmd)
+ *   UIManager::Get().BindDataModel<Traits>(h, &data);
+ *   UIManager::Get().BindEventCallback(h, "ev", []{ ... });
+ *   auto doc = UIManager::Get().LoadPanel("p.rml");
+ *   UIManager::Get().ShowPanel(doc);
+ *   // per frame: Update(dt) → Render(cmd)
  *   UIManager::Destroy();
  */
 MYRENDERER_BEGIN_CLASS(UIManager)
 #pragma region METHOD
 public:
 	static UIManager& METHOD(Get)();
-	static void METHOD(Create)(RHI::Viewport* viewport);
+	static void METHOD(Create)(UISystem* backend);
 	static void METHOD(Destroy)();
 
 	// Per-frame
-	void METHOD(ProcessInput)();
 	void METHOD(Update)(Float32 dt);
 	void METHOD(Render)(RHI::CommandList* cmd);
 
@@ -54,44 +54,46 @@ public:
 	UIInputBridge* METHOD(GetInputBridge)() CONST;
 
 	// Data model
-	UIModelHandle METHOD(CreateDataModel)(CONST String& name, bool allow_missing = false);
+	UIModelHandle METHOD(CreateDataModel)(CONST String& name);
 	void METHOD(DirtyVariable)(UIModelHandle model, CONST String& name);
 	void METHOD(RemoveDataModel)(UIModelHandle model);
 
-	/// @internal Bind an event callback.  The func type must match the
-	/// backend's expected signature.  Application code should use generated
-	/// Bind*() functions or MXWidget instead of calling this directly.
-	/// @param func_impl  Opaque pointer to a std::function with the backend's
-	///                    DataEventFunc signature (Rml::DataEventFunc).
-	void METHOD(BindEventCallbackImpl)(UIModelHandle model, CONST String& name,
-		void* func_impl);
+	/// Returns a backend-specific DataModelBinder (for Widget framework RTTR path).
+	UIDataModelBinder* METHOD(GetModelBinder)(UIModelHandle model);
 
-	// Document
-	UIDocHandle METHOD(LoadDocument)(CONST String& path);
-	void METHOD(ShowDocument)(UIDocHandle doc);
-	void METHOD(HideDocument)(UIDocHandle doc);
-	void METHOD(CloseDocument)(UIDocHandle doc);
+	/// Bind C++ members to a data model via generated UIWidgetBindingTraits<T>.
+	/// Template path (Sample usage) — fully type-safe, zero void*.
+	template<typename Traits, typename T>
+	void METHOD(BindDataModel)(UIModelHandle model, T* data)
+	{
+		if (m_backend)
+		{
+			auto* binder = m_backend->GetModelBinder(model);
+			if (binder) Traits::BindDataModel(binder, data);
+		}
+	}
+
+	/// Bind a plain std::function<void()> event callback.
+	void METHOD(BindEventCallback)(UIModelHandle model, CONST String& name,
+		std::function<void()> callback);
+
+	// Document / Panel
+	UIDocHandle METHOD(LoadPanel)(CONST String& path);
+	void METHOD(ShowPanel)(UIDocHandle doc);
+	void METHOD(HidePanel)(UIDocHandle doc);
+	void METHOD(ClosePanel)(UIDocHandle doc);
 
 	// Resources
-	bool METHOD(LoadFontFace)(CONST String& file_path);
+	bool METHOD(LoadFont)(CONST String& file_path);
 
 	// Query
 	bool METHOD(IsMouseInteracting)() CONST;
-
-	// Debug — enable the backend's visual debugger (RmlUi: F8 to toggle)
-	void METHOD(EnableDebugger)(bool enable);
-
-	/// @internal Returns an opaque pointer to the backend model constructor.
-	/// For use by generated Bind*() functions.  Cast to Rml::DataModelConstructor*
-	/// in code that knows the backend type.
-	void* METHOD(GetModelConstructor)(UIModelHandle model);
 
 private:
 	UIManager() MYDEFAULT;
 	~UIManager() MYDEFAULT;
 
-	class Impl;
-	Impl* m_impl = nullptr;
+	UISystem* m_backend = nullptr;
 	static UIManager* s_instance;
 
 	UIManager(CONST UIManager&) MYDELETE;

@@ -1,164 +1,141 @@
 #include "UIManager.h"
-
-// Only this .cpp file knows about the RmlUI backend.
-// All other Runtime and Application code goes through UIManager.
-#include "UI/RmlUI/RmlUIManager.h"
-#include "UI/RmlUI/RmlUIInputBridge.h"  // full type for inheritance upcast
-
-#include <RmlUi/Core/DataModelHandle.h>  // for Rml::DataEventFunc cast
-#include <RmlUi/Debugger.h>              // for EnableDebugger
-#include "RHI/RenderViewport.h"
+#include "UI/UISystem.h"
+#include "UI/UIDataModelBinder.h"
+#include "UI/UIRenderer.h"
+#include "UI/UIInputBridge.h"
 #include "RHI/RenderCommandList.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
 
-// ---------------------------------------------------------------------------
-// Pimpl — backend pointer hidden from header
-// ---------------------------------------------------------------------------
-
-class UIManager::Impl
-{
-public:
-	MXRender::UI::RmlUI::RmlUIManager* backend = nullptr;
-};
+// =========================================================================
+// Singleton lifecycle
+// =========================================================================
 
 UIManager* UIManager::s_instance = nullptr;
-
-// ---------------------------------------------------------------------------
-// Singleton lifecycle
-// ---------------------------------------------------------------------------
 
 UIManager& UIManager::Get()
 {
 	return *s_instance;
 }
 
-void UIManager::Create(RHI::Viewport* viewport)
+void UIManager::Create(UISystem* backend)
 {
-	if (s_instance) return;
+	if (s_instance || !backend) return;
 
 	s_instance = new UIManager();
-	s_instance->m_impl = new Impl();
-
-	s_instance->m_impl->backend = MXRender::UI::RmlUI::RmlUIManager::Get();
-	s_instance->m_impl->backend->Init(viewport);
+	s_instance->m_backend = backend;
 }
 
 void UIManager::Destroy()
 {
 	if (!s_instance) return;
 
-	MXRender::UI::RmlUI::RmlUIManager::Shutdown();
-
-	delete s_instance->m_impl;
-	s_instance->m_impl = nullptr;
+	if (s_instance->m_backend)
+	{
+		s_instance->m_backend->Shutdown();
+		delete s_instance->m_backend;
+		s_instance->m_backend = nullptr;
+	}
 
 	delete s_instance;
 	s_instance = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Per-frame lifecycle
-// ---------------------------------------------------------------------------
+// =========================================================================
+// Per-frame
+// =========================================================================
 
-void UIManager::ProcessInput()    { m_impl->backend->ProcessInput(); }
-void UIManager::Update(Float32 dt) { m_impl->backend->Update(dt); }
+void UIManager::Update(Float32 dt)
+{
+	if (m_backend) m_backend->Update(dt);
+}
 
 void UIManager::Render(RHI::CommandList* cmd)
 {
-	m_impl->backend->Render(cmd);
+	if (m_backend) m_backend->Render(cmd);
 }
 
-// ---------------------------------------------------------------------------
+// =========================================================================
 // Sub-system access
-// ---------------------------------------------------------------------------
+// =========================================================================
 
 UIRenderer* UIManager::GetRenderer() CONST
 {
-	return m_impl->backend->GetRenderer();
+	return m_backend ? m_backend->GetRenderer() : nullptr;
 }
 
 UIInputBridge* UIManager::GetInputBridge() CONST
 {
-	// RmlUIInputBridge publicly inherits UIInputBridge → implicit upcast
-	return m_impl->backend->GetInputBridge();
+	return m_backend ? m_backend->GetInputBridge() : nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Data model — UIModelHandle == RmlModelHandle (same type via alias)
-// ---------------------------------------------------------------------------
+// =========================================================================
+// Data model
+// =========================================================================
 
-UIModelHandle UIManager::CreateDataModel(CONST String& name, bool allow_missing)
+UIModelHandle UIManager::CreateDataModel(CONST String& name)
 {
-	return m_impl->backend->CreateDataModel(name, allow_missing);
-}
-
-void UIManager::BindEventCallbackImpl(UIModelHandle model, CONST String& name,
-	void* func_impl)
-{
-	auto& func = *static_cast<Rml::DataEventFunc*>(func_impl);
-	m_impl->backend->BindEventCallback(model, name, std::move(func));
+	return m_backend ? m_backend->CreateDataModel(name) : UIModelHandle{};
 }
 
 void UIManager::DirtyVariable(UIModelHandle model, CONST String& name)
 {
-	m_impl->backend->DirtyVariable(model, name);
+	if (m_backend) m_backend->DirtyVariable(model, name);
 }
 
 void UIManager::RemoveDataModel(UIModelHandle model)
 {
-	m_impl->backend->RemoveDataModel(model);
+	if (m_backend) m_backend->RemoveDataModel(model);
 }
 
-void* UIManager::GetModelConstructor(UIModelHandle model)
+UIDataModelBinder* UIManager::GetModelBinder(UIModelHandle model)
 {
-	return m_impl->backend->GetModelConstructor(model);
+	return m_backend ? m_backend->GetModelBinder(model) : nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Document management — UIDocHandle == RmlDocHandle (same type via alias)
-// ---------------------------------------------------------------------------
-
-UIDocHandle UIManager::LoadDocument(CONST String& path)
+void UIManager::BindEventCallback(UIModelHandle model, CONST String& name,
+	std::function<void()> callback)
 {
-	return m_impl->backend->LoadDocument(path);
+	if (m_backend) m_backend->BindEventCallback(model, name, std::move(callback));
 }
 
-void UIManager::ShowDocument(UIDocHandle doc)   { m_impl->backend->ShowDocument(doc); }
-void UIManager::HideDocument(UIDocHandle doc)   { m_impl->backend->HideDocument(doc); }
+// =========================================================================
+// Document / Panel
+// =========================================================================
 
-void UIManager::CloseDocument(UIDocHandle doc)
+UIDocHandle UIManager::LoadPanel(CONST String& path)
 {
-	m_impl->backend->CloseDocument(doc);
+	return m_backend ? m_backend->LoadPanel(path) : UIDocHandle{};
 }
 
-// ---------------------------------------------------------------------------
-// Resources
-// ---------------------------------------------------------------------------
-
-bool UIManager::LoadFontFace(CONST String& file_path)
+void UIManager::ShowPanel(UIDocHandle doc)
 {
-	return m_impl->backend->LoadFontFace(file_path);
+	if (m_backend) m_backend->ShowPanel(doc);
+}
+
+void UIManager::HidePanel(UIDocHandle doc)
+{
+	if (m_backend) m_backend->HidePanel(doc);
+}
+
+void UIManager::ClosePanel(UIDocHandle doc)
+{
+	if (m_backend) m_backend->ClosePanel(doc);
+}
+
+// =========================================================================
+// Resources / Query
+// =========================================================================
+
+bool UIManager::LoadFont(CONST String& file_path)
+{
+	return m_backend ? m_backend->LoadFont(file_path) : false;
 }
 
 bool UIManager::IsMouseInteracting() CONST
 {
-	return m_impl->backend->IsMouseInteracting();
-}
-
-void UIManager::EnableDebugger(bool enable)
-{
-	if (enable)
-	{
-		auto* ctx = m_impl->backend->GetContext();
-		if (ctx && !Rml::Debugger::IsVisible())
-			Rml::Debugger::Initialise(ctx);
-	}
-	else
-	{
-		Rml::Debugger::Shutdown();
-	}
+	return m_backend ? m_backend->IsMouseInteracting() : false;
 }
 
 MYRENDERER_END_NAMESPACE // UI

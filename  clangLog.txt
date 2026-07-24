@@ -236,18 +236,25 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\TypeConverter.inl \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Variant.inl \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\ScriptInterface.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIFileInterface.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIInputBridge.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\Input\InputKeys.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIInputBridge.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIManager.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIHandleTypes.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlDataModelBinder.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIDataModelBinder.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\DataModelHandle.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\DataStructHandle.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\DataTypeRegister.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\DataTypes.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\DataVariable.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Utilities.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIFileInterface.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIInputBridge.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Input\InputKeys.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIInputBridge.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIRenderer.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIRenderer.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIHandleTypes.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIDrawBuffer.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIRenderInterface.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUISystem.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UISystem.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\ElementDocument.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Element.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Box.h \
@@ -261,12 +268,8 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Transform.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\TransformPrimitive.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Element.inl \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIRenderer.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIRenderer.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIDrawBuffer.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUIRenderInterface.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\RmlUI\RmlUISystemInterface.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIBase.h imgui.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIBase.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIManager.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\UIRenderPass.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Render\Core\RenderGraph.h \
@@ -321,6 +324,7 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\ResourceManager.h \
   D:\Project\GameDevelop\MyRenderer\src\Sample\6-NeuralNetwork\Trainer.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\EditorRender\EditorUI.h \
+  imgui.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\EditorRender\Render.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\ThirdParty\imgui_node_editor\crude_json.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\sstream \

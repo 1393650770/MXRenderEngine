@@ -265,10 +265,9 @@ public:
 	VIRTUAL void METHOD(BeginUI_Logic)() ;
 	VIRTUAL void METHOD(EndUI_Render)() ;
 	VIRTUAL void METHOD(EndUI_Platform)() ;
-	//  UI 渲染裁剪支持（VK_CommandBuffer 专属，不在 RHI 抽象接口上）
-	// Used by VK_RmlRenderer to set per-draw scissor rectangles.
-	void METHOD(SetScissorEnable)(bool enable);
-	void METHOD(SetScissor)(Int x, Int y, UInt32 w, UInt32 h);
+	// Dynamic scissor state — RHI abstract interface override
+	VIRTUAL void METHOD(SetScissorEnable)(bool enable) OVERRIDE FINAL;
+	VIRTUAL void METHOD(SetScissor)(Int x, Int y, UInt32 w, UInt32 h) OVERRIDE FINAL;
 protected:
 	void METHOD(Allocate)();
 	void METHOD(Free)();

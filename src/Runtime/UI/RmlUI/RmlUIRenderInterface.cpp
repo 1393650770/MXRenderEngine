@@ -1,6 +1,5 @@
 #include "RmlUIRenderInterface.h"
 #include "RmlUIRenderer.h"
-#include "UI/UIRenderer.h"
 
 #include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/Core.h>
@@ -19,8 +18,8 @@ static UITextureHandle  ToTex(UInt32 raw) { UITextureHandle  h; h.value = raw; r
 class RmlUIRenderInterface::Impl : public Rml::RenderInterface
 {
 public:
-	UI::UIRenderer* renderer = nullptr;
-	explicit Impl(UI::UIRenderer* r) : renderer(r) {}
+	RmlUIRenderer* renderer = nullptr;
+	explicit Impl(RmlUIRenderer* r) : renderer(r) {}
 
 	Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices, Rml::Span<const int> indices) override
 	{
@@ -34,7 +33,7 @@ public:
 	void RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::Vector2f translation, Rml::TextureHandle texture) override
 	{
 		if (!renderer) return;
-		static_cast<RmlUIRenderer*>(renderer)->SetTranslation(translation.x, translation.y);
+		renderer->SetTranslation(translation.x, translation.y);
 		renderer->DrawGeometry(ToGeo(static_cast<UInt32>(geometry)),
 			nullptr, ToTex(static_cast<UInt32>(texture)));
 	}
@@ -106,7 +105,7 @@ public:
 	void RenderToClipMask(Rml::ClipMaskOperation operation, Rml::CompiledGeometryHandle geometry, Rml::Vector2f translation) override
 	{
 		if (!renderer) return;
-		static_cast<RmlUIRenderer*>(renderer)->SetTranslation(translation.x, translation.y);
+		renderer->SetTranslation(translation.x, translation.y);
 		renderer->RenderToClipMask(static_cast<Int>(operation),
 			ToGeo(static_cast<UInt32>(geometry)), nullptr);
 	}
@@ -118,10 +117,10 @@ public:
 	}
 };
 
-RmlUIRenderInterface::RmlUIRenderInterface(UI::UIRenderer* renderer) { m_impl = new Impl(renderer); }
+RmlUIRenderInterface::RmlUIRenderInterface(RmlUIRenderer* renderer) { m_impl = new Impl(renderer); }
 RmlUIRenderInterface::~RmlUIRenderInterface() { delete m_impl; m_impl = nullptr; }
 void* RmlUIRenderInterface::GetRmlInterface() CONST { return static_cast<Rml::RenderInterface*>(m_impl); }
-void RmlUIRenderInterface::SetRenderer(UI::UIRenderer* renderer) { if (m_impl) m_impl->renderer = renderer; }
+void RmlUIRenderInterface::SetRenderer(RmlUIRenderer* renderer) { if (m_impl) m_impl->renderer = renderer; }
 
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE

@@ -13,9 +13,9 @@ MYRENDERER_BEGIN_NAMESPACE(RmlUI)
  * Rml::SystemInterface implementation.
  *
  * Bridges RmlUI framework services to the engine's platform layer:
- * - Time (via glfwGetTime)
+ * - Time (via RmlUISystem::Update accumulated time, replaces glfwGetTime)
  * - Logging (via std::cout / MXRender log macros)
- * - Clipboard (via GLFW)
+ * - Clipboard (optional, v1: no-op)
  * - Mouse cursor (optional, v1: no-op)
  */
 MYRENDERER_BEGIN_CLASS(RmlUISystemInterface)
@@ -24,6 +24,9 @@ MYRENDERER_BEGIN_CLASS(RmlUISystemInterface)
 public:
 	RmlUISystemInterface();
 	VIRTUAL ~RmlUISystemInterface();
+
+	/// Set the current elapsed time. Called by RmlUISystem::Update(dt).
+	void METHOD(SetElapsedTime)(Float64 time);
 
 	/// Install this as the active SystemInterface for RmlUI.
 	/// Must be called before Rml::Initialise().

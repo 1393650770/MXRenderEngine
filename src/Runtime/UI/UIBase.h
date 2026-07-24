@@ -1,9 +1,13 @@
+/**
+ * @deprecated Use UISystem instead.  UIBase is retained only for
+ * EditorUI's AttachUiLayer path and will be removed once EditorUI
+ * migrates to UISystem (Step 8).
+ */
 
 #pragma once
 #ifndef _UIBASE_
 #define _UIBASE_
 
-#include <imgui.h>
 #include "Core/ConstDefine.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)

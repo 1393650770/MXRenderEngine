@@ -24,6 +24,12 @@
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
+class UIDataModelBinder;
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
+
+MYRENDERER_BEGIN_NAMESPACE(MXRender)
+MYRENDERER_BEGIN_NAMESPACE(UI)
 MYRENDERER_BEGIN_NAMESPACE(Widget)
 
 /// How a C++ property maps to a RmlUI data model variable.
@@ -53,9 +59,9 @@ template<typename T>
 struct UIWidgetBindingTraits
 {
 	/// Called by UIWidget::RegisterBindings() to bind C++ members to the
-	/// RmlUI data model via the backend's ModelConstructor.
-	/// @param ctor_opaque  void* pointing to Rml::DataModelConstructor.
-	static void BindDataModel(void* ctor_opaque, T* data) { (void)ctor_opaque; (void)data; }
+	/// UI data model via the abstract DataModelBinder.
+	/// @param binder  Backend-specific UIDataModelBinder instance.
+	static void BindDataModel(UI::UIDataModelBinder* binder, T* data) { (void)binder; (void)data; }
 
 	/// Returns the binding table for RTTR-based auto-diff.
 	static Vector<UIBindingEntry> GetBindingEntries(const rttr::type& type)

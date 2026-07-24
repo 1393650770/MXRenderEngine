@@ -3,7 +3,6 @@
 #include <RmlUi/Core/SystemInterface.h>
 #include <RmlUi/Core/Core.h>
 #include <RmlUi/Core/Log.h>
-#include <GLFW/glfw3.h>
 #include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -16,9 +15,11 @@ MYRENDERER_BEGIN_NAMESPACE(RmlUI)
 class RmlUISystemInterface::Impl : public Rml::SystemInterface
 {
 public:
+	Float64 elapsed_time = 0.0;
+
 	double GetElapsedTime() override
 	{
-		return glfwGetTime();
+		return elapsed_time;
 	}
 
 	bool LogMessage(Rml::Log::Type type, const Rml::String& message) override
@@ -51,6 +52,12 @@ RmlUISystemInterface::~RmlUISystemInterface()
 	Uninstall();
 	delete m_impl;
 	m_impl = nullptr;
+}
+
+void RmlUISystemInterface::SetElapsedTime(Float64 time)
+{
+	if (m_impl)
+		m_impl->elapsed_time = time;
 }
 
 void RmlUISystemInterface::Install()

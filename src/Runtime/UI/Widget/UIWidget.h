@@ -11,12 +11,18 @@
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
+class UIDataModelBinder;
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
+
+MYRENDERER_BEGIN_NAMESPACE(MXRender)
+MYRENDERER_BEGIN_NAMESPACE(UI)
 MYRENDERER_BEGIN_NAMESPACE(Widget)
 
 class UIWidgetManager;
 
 /**
- * Abstract base for a reflection-driven RmlUI data model wrapper.
+ * Abstract base for a reflection-driven UI data model wrapper.
  *
  * Each UIWidget owns one RmlUI DataModel.  Properties annotated with
  * UI_BIND_FIELD_AS / UI_BIND_TWO_WAY are automatically bound and
@@ -71,8 +77,8 @@ protected:
 	void METHOD(SetConcreteType)(CONST rttr::type& t) { m_concrete_type = t; }
 	/// Override to add custom bindings beyond the generated ones.
 	/// Default reads UIWidgetBindingTraits<T>::BindDataModel().
-	/// @param ctor_opaque  void* pointing to backend DataModelConstructor.
-	VIRTUAL void METHOD(RegisterBindings)(void* ctor_opaque);
+	/// @param binder  Backend-specific UIDataModelBinder instance.
+	VIRTUAL void METHOD(RegisterBindings)(UI::UIDataModelBinder* binder);
 
 	/// Called after a property is changed (OneWay diff or TwoWay set).
 	VIRTUAL void METHOD(OnPropertyChanged)(CONST String& display_name);

@@ -12,25 +12,24 @@
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
-class UIRenderer;
 MYRENDERER_BEGIN_NAMESPACE(RmlUI)
+class RmlUIRenderer;
 
 /**
- * Adapter: Rml::RenderInterface → UI::UIRenderer
+ * Adapter: Rml::RenderInterface → RmlUIRenderer
  *
  * Wraps all 20 Rml::RenderInterface virtuals, delegating each to
- * the corresponding UIRenderer method. This class is the bridge
- * between RmlUI's framework and our engine's abstract renderer.
+ * the corresponding RmlUIRenderer method. This class is the bridge
+ * between RmlUI's framework and our engine's renderer.
  *
  * The actual inheritance from Rml::RenderInterface is hidden in the
- * .cpp file via an internal Impl class (PIMPL pattern) so that this
- * header doesn't pull in RmlUi headers.
+ * .cpp file via an internal Impl class (PIMPL pattern).
  */
 MYRENDERER_BEGIN_CLASS(RmlUIRenderInterface)
 
 #pragma region METHOD
 public:
-	RmlUIRenderInterface(UI::UIRenderer* renderer);
+	RmlUIRenderInterface(RmlUIRenderer* renderer);
 	VIRTUAL ~RmlUIRenderInterface();
 
 	/// Get the underlying Rml::RenderInterface pointer.
@@ -38,7 +37,7 @@ public:
 	void* METHOD(GetRmlInterface)() CONST;
 
 	/// Update the renderer reference (in case renderer is recreated).
-	void METHOD(SetRenderer)(UI::UIRenderer* renderer);
+	void METHOD(SetRenderer)(RmlUIRenderer* renderer);
 
 protected:
 private:

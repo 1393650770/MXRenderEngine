@@ -22,13 +22,13 @@ void UIUserWidget::Initialize(UIWidgetManager* manager)
 	// Step 2: Load the RML document
 	if (!m_rml_path.empty())
 	{
-		m_doc_handle = UIManager::Get().LoadDocument(m_rml_path);
+		m_doc_handle = UIManager::Get().LoadPanel(m_rml_path);
 		if (m_doc_handle.IsValid())
 		{
 			if (m_auto_show)
-				UIManager::Get().ShowDocument(m_doc_handle);
+				UIManager::Get().ShowPanel(m_doc_handle);
 
-			std::cout << "[UIUserWidget] Loaded document: " << m_rml_path << std::endl;
+			std::cout << "[UIUserWidget] Loaded panel: " << m_rml_path << std::endl;
 		}
 		else
 		{
@@ -41,7 +41,7 @@ void UIUserWidget::Destroy()
 {
 	if (m_doc_handle.IsValid())
 	{
-		UIManager::Get().CloseDocument(m_doc_handle);
+		UIManager::Get().ClosePanel(m_doc_handle);
 		m_doc_handle = {};
 	}
 
@@ -54,20 +54,20 @@ void UIUserWidget::Destroy()
 void UIUserWidget::Show()
 {
 	if (m_doc_handle.IsValid())
-		UIManager::Get().ShowDocument(m_doc_handle);
+		UIManager::Get().ShowPanel(m_doc_handle);
 }
 
 void UIUserWidget::Hide()
 {
 	if (m_doc_handle.IsValid())
-		UIManager::Get().HideDocument(m_doc_handle);
+		UIManager::Get().HidePanel(m_doc_handle);
 }
 
 void UIUserWidget::Close()
 {
 	if (m_doc_handle.IsValid())
 	{
-		UIManager::Get().CloseDocument(m_doc_handle);
+		UIManager::Get().ClosePanel(m_doc_handle);
 		m_doc_handle = {};
 	}
 }

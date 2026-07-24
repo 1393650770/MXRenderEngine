@@ -2,12 +2,12 @@
 
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderCommandList.h"
+#include "RHI/RenderViewport.h"
 #include "RHI/RenderShader.h"
 #include "RHI/RenderTexture.h"
 #include "RHI/RenderBuffer.h"
 #include "RHI/RenderRource.h"
 #include "RHI/RenderPipelineState.h"
-#include "RHI/Vulkan/VK_CommandBuffer.h"
 #include "Tool/BufferUtils.h"
 
 #include <fstream>
@@ -317,7 +317,7 @@ void RmlUIRenderer::EnableScissor(bool enable)
 {
 	m_scissor_enabled = enable;
 	if (m_current_cmd)
-		static_cast<RHI::Vulkan::VK_CommandBuffer*>(m_current_cmd)->SetScissorEnable(enable);
+		m_current_cmd->SetScissorEnable(enable);
 }
 
 void RmlUIRenderer::SetScissor(Int x, Int y, UInt32 w, UInt32 h)
@@ -331,7 +331,7 @@ void RmlUIRenderer::SetScissor(Int x, Int y, UInt32 w, UInt32 h)
 	{
 		// [AI] Y passed straight through: RmlUi scissor uses top-left origin (y=0=top),
 		// Vulkan VkRect2D offset.y is also top-left with positive-height viewport.
-		static_cast<RHI::Vulkan::VK_CommandBuffer*>(m_current_cmd)->SetScissor(x, y, w, h);
+		m_current_cmd->SetScissor(x, y, w, h);
 	}
 }
 

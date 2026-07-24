@@ -57,6 +57,9 @@ public:
 	// No ImGui in wasm: stubbed
 	VIRTUAL void METHOD(BeginUI)() OVERRIDE FINAL {}
 	VIRTUAL void METHOD(EndUI)() OVERRIDE FINAL {}
+	// WebGPU: scissoring not currently used for UI; stubbed
+	VIRTUAL void METHOD(SetScissorEnable)(bool enable) OVERRIDE FINAL { (void)enable; }
+	VIRTUAL void METHOD(SetScissor)(Int x, Int y, UInt32 w, UInt32 h) OVERRIDE FINAL { (void)x; (void)y; (void)w; (void)h; }
 #pragma endregion
 
 private:
