@@ -274,6 +274,9 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\FileSystem\BasicFileSystem.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\FileSystem\Win\WinFileSystem.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\glTF\glTFLoader.h \
+  D:\Project\GameDevelop\MyRenderer\src\ThirdParty\tinygltf\tiny_gltf.h \
+  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\cassert \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\ucrt\assert.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\MeshAsset.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\RHIHandleTypes.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\future \
@@ -436,8 +439,6 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Editor\EditorRender\Render.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\ThirdParty\imgui_node_editor\crude_json.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\sstream \
-  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\cassert \
-  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\ucrt\assert.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\ThirdParty\imgui_node_editor\imgui_bezier_math.h \
   D:\Project\GameDevelop\MyRenderer\src\Editor\ThirdParty\imgui_node_editor\imgui_extra_math.h \
   imgui_internal.h \

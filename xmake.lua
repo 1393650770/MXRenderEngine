@@ -123,6 +123,12 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Asset/TextureAsset.cpp")  -- depends on gli/TextureLoader
         remove_files("src/ThirdParty/emsdk/**")  -- emsdk is a build tool, not library source
         remove_files("src/ThirdParty/spv_reflect/**")  -- SPIR-V only, not needed for GLES3
+        remove_files("src/ThirdParty/tinygltf/examples/**")  -- tinygltf samples, not needed
+        remove_files("src/ThirdParty/tinygltf/tests/**")     -- tinygltf tests
+        remove_files("src/ThirdParty/tinygltf/models/**")    -- tinygltf test models
+        remove_files("src/ThirdParty/tinygltf/tools/**")     -- tinygltf tools
+        remove_files("src/ThirdParty/tinygltf/benchmark/**") -- tinygltf benchmarks
+        remove_files("src/ThirdParty/tinygltf/experimental/**")
         remove_files("src/Runtime/UI/Widget/**")  -- depends on rttr
         remove_files("src/Runtime/UI/UIBase.cpp")  -- depends on Widget/rttr
         remove_files("src/Runtime/UI/UIManager.cpp")  -- depends on Widget/rttr

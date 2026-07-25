@@ -2,16 +2,11 @@
 #ifndef _GLTF_LOADER_
 #define _GLTF_LOADER_
 
-// glTF 2.0 Runtime Loader — Adapter pattern (tinygltf → MeshDataPayload).
-// Requires ThirdParty/tinygltf/tiny_gltf.h (header-only, MIT license).
-// Pull: cd src/ThirdParty && git clone https://github.com/syoyo/tinygltf.git --depth 1
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#define TINYGLTF_NO_INCLUDE_STB_IMAGE  // use our own stb_image from ThirdParty
+#include "tinygltf/tiny_gltf.h"
 
 #include "Core/ConstDefine.h"
-
-// TODO: uncomment when tinygltf is pulled
-// #define TINYGLTF_NO_INCLUDE_STB_IMAGE
-// #define TINYGLTF_NO_STB_IMAGE_WRITE
-// #include "tinygltf/tiny_gltf.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Asset)
@@ -19,16 +14,14 @@ MYRENDERER_BEGIN_NAMESPACE(glTF)
 
 struct glTFPrimitive
 {
-	UInt32 index_offset = 0;
-	UInt32 index_count = 0;
-	UInt32 vertex_offset = 0;
-	UInt32 vertex_count = 0;
+	UInt32 index_offset = 0, index_count = 0;
+	UInt32 vertex_offset = 0, vertex_count = 0;
 	Int material_index = -1;
 };
 
 struct glTFMeshData
 {
-	Vector<float> vertices;          // interleaved: pos(3) + normal(3) + uv(2) = 8 floats
+	Vector<float> vertices;   // interleaved: pos(3)+normal(3)+uv(2)=8 floats/vertex
 	Vector<UInt32> indices;
 	Vector<glTFPrimitive> primitives;
 };
@@ -36,20 +29,17 @@ struct glTFMeshData
 MYRENDERER_BEGIN_CLASS(glTFLoader)
 #pragma region METHOD
 public:
-	// Load from file (requires AsyncFileIO or sync PlatformFileIO)
-	// static Bool LoadFromFile(const String& path, Vector<glTFMeshData>& out);
-
-	// Load from memory buffer (.gltf or .glb)
-	// static Bool LoadFromMemory(const UInt8* data, size_t size, Vector<glTFMeshData>& out);
-
-	// Full implementation in glTFLoader.cpp — requires tinygltf header
+	static Bool METHOD(LoadFromFile)(const String& path, Vector<glTFMeshData>& out);
+	static Bool METHOD(LoadFromMemory)(const UInt8* data, size_t size, Vector<glTFMeshData>& out);
 protected:
 private:
+	static void METHOD(ProcessMesh)(tinygltf::Model& model, tinygltf::Mesh& mesh, glTFMeshData& out);
+	static void METHOD(ProcessAccessor)(tinygltf::Model& model, Int accessor_idx, float* dst, Int stride, Int offset);
 #pragma endregion
 MYRENDERER_END_CLASS
 
-MYRENDERER_END_NAMESPACE  // glTF
-MYRENDERER_END_NAMESPACE  // Asset
-MYRENDERER_END_NAMESPACE  // MXRender
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
 
-#endif // _GLTF_LOADER_
+#endif
