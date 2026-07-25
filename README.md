@@ -268,7 +268,21 @@ Plus a vendored `TaskScheduler` with fiber-based work stealing, grouped tasks, a
 | **WeChat MiniGame** | WebGL 2.0 (GLES3) | ✅ Pack scripts ready |
 | **Douyin MiniGame** | WebGL 2.0 (GLES3) | ✅ Pack scripts ready |
 
-Android build chain: NDK r27+ → xmake cross-compile → `.so` → `aapt2` + `zipalign` + `apksigner` → APK. APK packaging scripts in `pack/Android/`.
+Android build chain: NDK r27+ -> xmake cross-compile -> .so -> APK.
+
+```batch
+# One-click build
+build_android.bat
+
+# Or manual
+xmake f -p android -a arm64-v8a --ndk=D:/path/to/ndk --ndk_sdkver=26 -y
+xmake build RendererSample-HelloTriangle
+
+# Package APK (configure SDK/JDK paths in pack/Android/build_apk.bat first)
+.\pack\Android\build_apk.bat
+```
+
+All toolchain paths in `.xmake/paths.ini`.
 
 ### 🎮 MiniGame Build (WeChat / Douyin / Browser)
 

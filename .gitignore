@@ -44,9 +44,5 @@ vsxmake2019
 vsxmake2019/
 vsxmake*
 
-# Android packaging outputs
-pack/Android/debug.keystore
-pack/Android/mxrender_hello.apk*
-pack/Android/tmp_apk/
 
 

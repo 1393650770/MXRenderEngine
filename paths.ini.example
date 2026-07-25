@@ -1,0 +1,6 @@
+# MyRenderer Toolchain Paths (example)
+# Copy to .xmake/paths.ini and edit paths for your machine.
+# Relative paths are resolved from project root.
+
+NDK = D:/path/to/android-ndk-r27d
+EMSDK = src/ThirdParty/emsdk

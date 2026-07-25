@@ -376,13 +376,24 @@ target("CompileResource")
 target("Runtime")
     if is_plat("android") then
         on_load(function (target)
-            local ndk_path = io.readfile(os.projectdir() .. "/.xmake/android_ndk.txt")
+            -- Read NDK path from .xmake/paths.ini (key=value format)
+            local function read_ini_key(filepath, key)
+                local f = io.open(filepath, "r")
+                if not f then return nil end
+                for line in f:lines() do
+                    local k, v = line:match("^%s*" .. key .. "%s*=%s*(.+)")
+                    if k then f:close(); return v end
+                end
+                f:close(); return nil
+            end
+            local ini = os.projectdir() .. "/.xmake/paths.ini"
+            local ndk_path = read_ini_key(ini, "NDK")
             if ndk_path then
                 local glue_dir = ndk_path:trim() .. "/sources/android/native_app_glue"
                 target:add("includedirs", glue_dir, {public = true})
                 target:add("files", glue_dir .. "/android_native_app_glue.c")
             else
-                raise("Cannot read .xmake/android_ndk.txt -- set your NDK path there")
+                raise("Cannot read NDK path from .xmake/paths.ini -- set NDK = your/path there")
             end
         end)
     end

@@ -1,14 +1,27 @@
 #!/bin/bash
 # Emscripten SDK environment setup for MyRenderer
-# Source this before building: source emsdk_setup.sh
+# Reads EMSDK path from .xmake/paths.ini or uses vendored emsdk.
+# Usage: source emsdk_setup.sh
 
-EMSDK_ROOT="/d/Project/GameDevelop/MyRenderer/src/ThirdParty/emsdk"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INI_FILE="$SCRIPT_DIR/.xmake/paths.ini"
 
-export EMSDK="$EMSDK_ROOT"
-export EMSCRIPTEN="$EMSDK_ROOT/upstream/emscripten"
-export EMSDK_NODE="$EMSDK_ROOT/node/22.16.0_64bit/bin/node.exe"
-export EMSDK_PYTHON="$EMSDK_ROOT/python/3.13.3_64bit/python.exe"
-export PATH="$EMSDK_ROOT/upstream/emscripten:$EMSDK_ROOT/node/22.16.0_64bit/bin:$EMSDK_ROOT:$PATH"
+if [ -f "$INI_FILE" ]; then
+    EMSDK=$(grep -i "^EMSDK" "$INI_FILE" | cut -d'=' -f2- | xargs)
+    # Resolve relative path
+    case "$EMSDK" in
+        /*|[A-Za-z]:*) ;;  # absolute
+        *) EMSDK="$SCRIPT_DIR/$EMSDK" ;;
+    esac
+else
+    EMSDK="$SCRIPT_DIR/src/ThirdParty/emsdk"
+fi
 
-echo "[emsdk] Environment set up: EMSDK=$EMSDK"
-echo "[emsdk] emcc version: $("$EMSDK_PYTHON" "$EMSCRIPTEN/emcc.py" --version 2>&1 | head -1)"
+export EMSDK
+export EMSCRIPTEN="$EMSDK/upstream/emscripten"
+export EMSDK_NODE="$EMSDK/node/22.16.0_64bit/bin/node.exe"
+export EMSDK_PYTHON="$EMSDK/python/3.13.3_64bit/python.exe"
+export PATH="$EMSDK/upstream/emscripten:$EMSDK/node/22.16.0_64bit/bin:$EMSDK:$PATH"
+
+echo "[emsdk] EMSDK=$EMSDK"
+echo "[emsdk] emcc: $("$EMSDK_PYTHON" "$EMSCRIPTEN/emcc.py" --version 2>&1 | head -1)"
