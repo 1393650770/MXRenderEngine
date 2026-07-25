@@ -25,14 +25,20 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-echo.
-echo === Building MiniGame-HelloTriangle ===
-xmake build MiniGame-HelloTriangle
-if %ERRORLEVEL% NEQ 0 (
-    echo === Build FAILED ===
-    exit /b 1
+for %%S in (MiniGame-HelloTriangle MiniGame-Texture MiniGame-Mesh) do (
+    echo.
+    echo === Building %%S ===
+    xmake build %%S
+    if %ERRORLEVEL% NEQ 0 (
+        echo === %%S FAILED ===
+        exit /b 1
+    )
 )
 
 echo.
-echo === Build SUCCESS ===
-echo Output: build\wasm\wasm32\debug\MiniGame-HelloTriangle.js
+echo ============================================
+echo  All 3 MiniGame samples built successfully!
+echo  Output: build\wasm\wasm32\%MODE%\
+echo  Serve:  python -m http.server 8080
+echo  Open:   http://localhost:8080/MiniGame-Mesh.html
+echo ============================================

@@ -5,28 +5,18 @@
 #if !PLATFORM_GLES3 && !PLATFORM_ANDROID
 
 // Desktop Network — BSD socket + KCP reliable UDP.
-// Windows: WinSock2, Linux: POSIX sockets.
+// WinSock includes are hidden in the .cpp to avoid windows.h conflicts.
 
 #include "Network/NetworkSystem.h"
 #include "Network/KCP/KCPSocket.h"
 #include <map>
 #include <functional>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
-using socklen_t = int;
-#else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <fcntl.h>
-#define SOCKET int
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
+// Opaque socket handle (avoids WinSock/windows.h conflicts in header)
+#ifndef INVALID_SOCKET_DEFINED
+#define INVALID_SOCKET_DEFINED
+using SOCKET_HANDLE = uintptr_t;
+static constexpr SOCKET_HANDLE kInvalidSocket = (SOCKET_HANDLE)(-1);
 #endif
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -43,7 +33,6 @@ public:
 	VIRTUAL void METHOD(HTTPPost)(const String& url, const String& body, HTTPCallback cb) OVERRIDE FINAL;
 	VIRTUAL void METHOD(Update)() OVERRIDE FINAL;
 
-	// KCP reliable channel: open UDP socket + wrap with KCP
 	Bool  METHOD(CreateChannel)(UInt16 port);
 	void  METHOD(SendTo)(UInt32 conv, const void* data, Int len);
 	Int   METHOD(RecvFrom)(UInt32 conv, void* buf, Int len);
@@ -57,20 +46,22 @@ private:
 
 #pragma region MEMBER
 protected:
-	SOCKET m_socket = INVALID_SOCKET;
-	struct sockaddr_in m_addr {};
+	SOCKET_HANDLE m_socket = kInvalidSocket;
 	Bool m_wsa_initialized = false;
 
-	struct Channel { Network::KCP::KCPSocket* kcp = nullptr; struct sockaddr_in addr {}; };
+	struct Channel { Network::KCP::KCPSocket* kcp = nullptr; };
 	std::map<UInt32, Channel> m_channels;
-	std::map<UInt32, struct sockaddr_in> m_peers;  // conv → remote addr
+
+	// Opaque peer address storage
+	struct PeerAddr { UInt8 data[16]; UInt32 port = 0; };
+	std::map<UInt32, PeerAddr> m_peers;
 private:
 #pragma endregion
 MYRENDERER_END_CLASS
 
-MYRENDERER_END_NAMESPACE  // Desktop
-MYRENDERER_END_NAMESPACE  // Network
-MYRENDERER_END_NAMESPACE  // MXRender
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
 
 #endif // !PLATFORM_GLES3
 #endif // _DESKTOP_NETWORK_

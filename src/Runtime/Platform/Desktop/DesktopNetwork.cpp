@@ -1,9 +1,27 @@
 #if !PLATFORM_GLES3 && !PLATFORM_ANDROID
 
+// WinSock includes must come before any windows.h (GLFW/Vulkan may pull it in)
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+using socklen_t = int;
+#define SOCKET_ERR SOCKET_ERROR
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#define SOCKET_ERR (-1)
+#endif
+
 #include "Platform/Desktop/DesktopNetwork.h"
 #include <iostream>
 #include <cstring>
-#include <ikcp.h>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Network)
@@ -15,28 +33,32 @@ DesktopNetwork::DesktopNetwork()
 	WSADATA wsa;
 	m_wsa_initialized = (WSAStartup(MAKEWORD(2, 2), &wsa) == 0);
 #endif
-	m_socket = socket(AF_INET, SOCK_DGRAM, 0);
-	if (m_socket != INVALID_SOCKET)
-	{
-		// Non-blocking
 #ifdef _WIN32
-		u_long mode = 1; ioctlsocket(m_socket, FIONBIO, &mode);
+	SOCKET s = socket(AF_INET, SOCK_DGRAM, 0);
 #else
-		fcntl(m_socket, F_SETFL, O_NONBLOCK);
+	int s = socket(AF_INET, SOCK_DGRAM, 0);
 #endif
-		std::cout << "[DesktopNetwork] UDP socket created" << std::endl;
+	m_socket = (SOCKET_HANDLE)s;
+
+	if (m_socket != kInvalidSocket)
+	{
+#ifdef _WIN32
+		u_long mode = 1; ioctlsocket((SOCKET)m_socket, FIONBIO, &mode);
+#else
+		fcntl((int)m_socket, F_SETFL, O_NONBLOCK);
+#endif
 	}
 }
 
 DesktopNetwork::~DesktopNetwork()
 {
 	for (auto& [conv, ch] : m_channels) { if (ch.kcp) delete ch.kcp; }
-	if (m_socket != INVALID_SOCKET)
+	if (m_socket != kInvalidSocket)
 	{
 #ifdef _WIN32
-		closesocket(m_socket);
+		closesocket((SOCKET)m_socket);
 #else
-		close(m_socket);
+		close((int)m_socket);
 #endif
 	}
 #ifdef _WIN32
@@ -46,41 +68,54 @@ DesktopNetwork::~DesktopNetwork()
 
 void DesktopNetwork::HTTPGet(const String& url, HTTPCallback cb)
 {
-	std::cout << "[DesktopNetwork] HTTPGet stub: " << url << std::endl;
-	if (cb) cb(false, "Desktop HTTP requires libcurl (Phase 4)");
+	if (cb) cb(false, "HTTP stub (Phase 4)");
 }
 
 void DesktopNetwork::HTTPPost(const String& url, const String& body, HTTPCallback cb)
 {
-	if (cb) cb(false, "Desktop HTTP requires libcurl (Phase 4)");
+	if (cb) cb(false, "HTTP stub (Phase 4)");
 }
 
 void DesktopNetwork::UDPOutput(const void* data, Int len, void* user)
 {
 	auto* self = static_cast<DesktopNetwork*>(user);
-	if (self->m_socket == INVALID_SOCKET || !data || len <= 0) return;
+	if (self->m_socket == kInvalidSocket || !data || len <= 0) return;
 
-	// Send to all peers (simplified: broadcast per-channel)
 	for (auto& [conv, peer] : self->m_peers)
 	{
-		sendto(self->m_socket, static_cast<const char*>(data), len, 0,
-			reinterpret_cast<const struct sockaddr*>(&peer), sizeof(peer));
+		struct sockaddr_in addr = {};
+		addr.sin_family = AF_INET;
+		addr.sin_port = htons((u_short)peer.port);
+		memcpy(&addr.sin_addr, peer.data, 4);
+
+#ifdef _WIN32
+		sendto((SOCKET)self->m_socket, static_cast<const char*>(data), len, 0,
+			reinterpret_cast<const struct sockaddr*>(&addr), sizeof(addr));
+#else
+		sendto((int)self->m_socket, data, len, 0,
+			(const struct sockaddr*)&addr, sizeof(addr));
+#endif
 	}
 }
 
 Bool DesktopNetwork::CreateChannel(UInt16 port)
 {
-	if (m_socket == INVALID_SOCKET) return false;
+	if (m_socket == kInvalidSocket) return false;
 
-	m_addr.sin_family = AF_INET;
-	m_addr.sin_port = htons(port);
-	m_addr.sin_addr.s_addr = INADDR_ANY;
-	bind(m_socket, reinterpret_cast<struct sockaddr*>(&m_addr), sizeof(m_addr));
+	struct sockaddr_in addr = {};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	addr.sin_addr.s_addr = INADDR_ANY;
 
-	// KCP conv ID = port
+#ifdef _WIN32
+	bind((SOCKET)m_socket, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+#else
+	bind((int)m_socket, (struct sockaddr*)&addr, sizeof(addr));
+#endif
+
 	auto* kcp = new Network::KCP::KCPSocket(port, this);
 	kcp->SetOutput(UDPOutput);
-	m_channels[port] = { kcp, m_addr };
+	m_channels[port] = { kcp };
 	return true;
 }
 
@@ -108,26 +143,33 @@ void DesktopNetwork::CloseChannel(UInt32 conv)
 
 void DesktopNetwork::PollUDP()
 {
-	if (m_socket == INVALID_SOCKET) return;
+	if (m_socket == kInvalidSocket) return;
 
 	char buf[2048];
-	struct sockaddr_in from {};
+	struct sockaddr_in from = {};
 	socklen_t from_len = sizeof(from);
 
 	while (true)
 	{
-		int n = recvfrom(m_socket, buf, sizeof(buf), 0,
+#ifdef _WIN32
+		int n = recvfrom((SOCKET)m_socket, buf, sizeof(buf), 0,
 			reinterpret_cast<struct sockaddr*>(&from), &from_len);
+#else
+		int n = recvfrom((int)m_socket, buf, sizeof(buf), 0,
+			(struct sockaddr*)&from, &from_len);
+#endif
 		if (n <= 0) break;
 
-		// Extract KCP conv from header (first 4 bytes)
 		if (n >= 4)
 		{
 			UInt32 conv = *reinterpret_cast<UInt32*>(buf);
 			auto it = m_channels.find(conv);
 			if (it != m_channels.end() && it->second.kcp)
 			{
-				m_peers[conv] = from;  // remember remote addr
+				PeerAddr pa;
+				memcpy(pa.data, &from.sin_addr, 4);
+				pa.port = ntohs(from.sin_port);
+				m_peers[conv] = pa;
 				it->second.kcp->Input(buf + 4, n - 4);
 			}
 		}
@@ -137,16 +179,14 @@ void DesktopNetwork::PollUDP()
 void DesktopNetwork::Update()
 {
 	PollUDP();
-	// Drive KCP clock for all channels
-	UInt32 now = 0; // TODO: use platform time
 	for (auto& [conv, ch] : m_channels)
 	{
-		if (ch.kcp) ch.kcp->Update(now);
+		if (ch.kcp) ch.kcp->Update(0);
 	}
 }
 
-MYRENDERER_END_NAMESPACE  // Desktop
-MYRENDERER_END_NAMESPACE  // Network
-MYRENDERER_END_NAMESPACE  // MXRender
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
+MYRENDERER_END_NAMESPACE
 
 #endif // !PLATFORM_GLES3

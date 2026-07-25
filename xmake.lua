@@ -39,20 +39,8 @@ add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.vsxmake.autoupdate")
 
 rule("module")
-    on_load(function (target)   
-        if is_mode("debug") then
-            target:set("kind", "static")
-        elseif is_mode("release", "releasedbg") then
-            target:set("kind", "shared")
-            if is_plat("windows") then
-                import("core.project.rule")
-                local rule = rule.rule("utils.symbols.export_all")
-                target:rule_add(rule)
-                target:extraconf_set("rules", "utils.symbols.export_all", {export_classes = true})
-            end
-        else
-            assert(false, "Unknown build kind")
-        end
+    on_load(function (target)
+        target:set("kind", "static")  -- always static: avoids DLL CRT conflicts with flatbuffers(MT)
     end)
 rule_end()
 includes("src/**/xmake.lua")
@@ -91,6 +79,7 @@ end
 
 function CommonLibrarySetting()
     set_languages("clatest", "cxx20")
+    if is_plat("windows") then set_runtimes("MT") end  -- static CRT matches flatbuffers
     PlatformSettings()
     add_headerfiles("src/Runtime/**.h")
     add_files("src/Runtime/**.cpp")
@@ -121,14 +110,7 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Tool/ToolUtils.cpp")  -- depends on gli
         remove_files("src/Runtime/Tool/TextureLoader.cpp")  -- depends on gli
         remove_files("src/Runtime/Asset/TextureAsset.cpp")  -- depends on gli/TextureLoader
-        remove_files("src/ThirdParty/emsdk/**")  -- emsdk is a build tool, not library source
         remove_files("src/ThirdParty/spv_reflect/**")  -- SPIR-V only, not needed for GLES3
-        remove_files("src/ThirdParty/tinygltf/examples/**")  -- tinygltf samples, not needed
-        remove_files("src/ThirdParty/tinygltf/tests/**")     -- tinygltf tests
-        remove_files("src/ThirdParty/tinygltf/models/**")    -- tinygltf test models
-        remove_files("src/ThirdParty/tinygltf/tools/**")     -- tinygltf tools
-        remove_files("src/ThirdParty/tinygltf/benchmark/**") -- tinygltf benchmarks
-        remove_files("src/ThirdParty/tinygltf/experimental/**")
         remove_files("src/Runtime/UI/Widget/**")  -- depends on rttr
         remove_files("src/Runtime/UI/UIBase.cpp")  -- depends on Widget/rttr
         remove_files("src/Runtime/UI/UIManager.cpp")  -- depends on Widget/rttr
@@ -153,6 +135,15 @@ function CommonLibrarySetting()
         add_files("src/ThirdParty/spv_reflect/**.cpp")
     end
     add_files("src/ThirdParty/**.c")
+    remove_files("src/ThirdParty/emsdk/**")     -- emsdk is a build tool, not library source
+    remove_files("src/ThirdParty/tinygltf/examples/**")
+    remove_files("src/ThirdParty/tinygltf/tests/**")
+    remove_files("src/ThirdParty/tinygltf/models/**")
+    remove_files("src/ThirdParty/tinygltf/tools/**")
+    remove_files("src/ThirdParty/tinygltf/benchmark/**")
+    remove_files("src/ThirdParty/tinygltf/experimental/**")
+    remove_files("src/ThirdParty/tinygltf/wasm/**")
+    remove_files("src/ThirdParty/TaskScheduler/Scheduler/Source/**.cpp")  -- _aligned_malloc removed in new MSVC
     -- RmlUI library (retained-mode game UI)
     add_includedirs("src/ThirdParty/RmlUi/Include", {public = true})
     add_files("src/ThirdParty/RmlUi/Source/Core/**.cpp|**/FontEngineDefault/**")
@@ -345,6 +336,9 @@ function CommonProjectSetting()
         set_kind("binary")
     end
     set_languages("clatest", "cxx20")
+    if is_plat("windows") then
+        set_runtimes("MT")  -- static CRT to match flatbuffers(MT)
+    end
     add_defines("RMLUI_STATIC_LIB")
     PlatformSettings()
     add_deps("Runtime")

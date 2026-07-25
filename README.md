@@ -70,8 +70,16 @@ It is developed as a solo engine project, prioritizing **architectural clarity**
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
 │  │   RHI    │  │  Render  │  │   UI     │  │  Asset  │ │
 │  │ Vulkan   │  │  Graph   │  │ RmlUI    │  │  Mesh   │ │
-│  │ WebGPU   │  │ Compile  │  │ Widget   │  │ Texture │ │
-│  │ GLES3    │  │ Execute  │  │ Binding  │  │         │ │
+│  │ WGPU     │  │ Compile  │  │ Widget   │  │ Texture │ │
+│  │ GLES3    │  │ Execute  │  │ Binding  │  │ glTF    │ │
+│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
+│  │ Platform │  │ Network  │  │  Audio   │  │  Input  │ │
+│  │ Desktop  │  │   KCP    │  │ Browser  │  │ Action  │ │
+│  │ Android  │  │ Browser  │  │ WeChat   │  │  Map    │ │
+│  │Emscripten│  │ Desktop  │  │ Douyin   │  │         │ │
+│  │ WeChat   │  │          │  │          │  │         │ │
+│  │ Douyin   │  │          │  │          │  │         │ │
 │  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
 ├─────────────────────────────────────────────────────────┤
 │  ThirdParty        Vulkan · GLFW · ImGui · Boost · ...  │
@@ -94,7 +102,7 @@ A platform-agnostic GPU abstraction inspired by UE's RHI design. Three backends 
 |---------|--------|-------|----------|
 | **Vulkan** | ✅ Primary | 30+ (VK_*) | Windows, Android |
 | **WebGPU** | 🧪 Experimental | 14 (WGPU_*) | Browser / WASM |
-| **GLES3** | 🧪 Experimental | 12 (GLES3_*) | iOS / WebGL2 |
+| **GLES3** | ✅ MiniGame-ready | 19 (GLES3_*) | WASM / WebGL2 / WeChat / Douyin |
 
 All backends share the same abstract commands: `CreateTexture`, `CreateBuffer`, `SetGraphicsPipeline`, `Draw`, `Dispatch`, `ResourceBarrier`, `TransitionTextureState`, etc. Capability differences are queried at runtime via `DeviceProfile` (bindless support, dynamic rendering, compressed texture formats, unified memory, VRAM size).
 
@@ -256,9 +264,46 @@ Plus a vendored `TaskScheduler` with fiber-based work stealing, grouped tasks, a
 |----------|-----------------|--------|
 | **Windows** | Vulkan | ✅ Primary development target |
 | **Android** (ARM64) | Vulkan | ✅ Cross-compilation + APK packaging verified; rendering under investigation |
-| **WebAssembly** | WebGPU / WebGL 2.0 | 🧪 Experimental backends in place |
+| **WebAssembly** | WebGL 2.0 (GLES3) | ✅ MiniGame samples verified |
+| **WeChat MiniGame** | WebGL 2.0 (GLES3) | ✅ Pack scripts ready |
+| **Douyin MiniGame** | WebGL 2.0 (GLES3) | ✅ Pack scripts ready |
 
 Android build chain: NDK r27+ → xmake cross-compile → `.so` → `aapt2` + `zipalign` + `apksigner` → APK. APK packaging scripts in `pack/Android/`.
+
+### 🎮 MiniGame Build (WeChat / Douyin / Browser)
+
+**Prerequisites**: Emscripten SDK 6.0.4+ installed at `src/ThirdParty/emsdk/`.
+
+```batch
+# Build all 3 WASM samples (HelloTriangle, Texture, Mesh)
+build_wasm.bat
+
+# Browser preview
+cd build\wasm\wasm32\debug
+python -m http.server 8080
+# → http://localhost:8080/MiniGame-Mesh.html
+```
+
+**Package for WeChat**:
+```batch
+pack\WeChat\build_pack.bat MiniGame-Mesh debug
+# Output: pack\WeChat\dist\MiniGame-Mesh_wx\
+# → Import into WeChat Developer Tools → Compile → Preview
+```
+
+**Package for Douyin**:
+```batch
+pack\Douyin\build_pack.bat MiniGame-Mesh debug
+# Output: pack\Douyin\dist\MiniGame-Mesh_tt\
+# → Import into Douyin Developer Tools → Compile → Preview
+```
+
+**MiniGame Samples**:
+| Target | Feature |
+|--------|---------|
+| `MiniGame-HelloTriangle` | Hardcoded triangle via gl_VertexID |
+| `MiniGame-Texture` | Fullscreen quad + checkerboard texture sampling |
+| `MiniGame-Mesh` | Rotating cube VBO+VAO+UBO + mouse/touch orbit camera |
 
 ## 🚀 Getting Started
 
@@ -461,12 +506,12 @@ MyRenderer/
 │   │   ├── Core/                # Base types (ConstDefine.h), ResourceHandle, reflection
 │   │   ├── RHI/                 # RHI abstraction + ResourceManager
 │   │   │   ├── Vulkan/          #   VK_* backend (30+ files)
-│   │   │   ├── WebGPU/          #   WGPU_* backend (experimental)
-│   │   │   └── GLES3/           #   GLES3_* backend (experimental)
+│   │   │   ├── WGPU/            #   WGPU_* backend (experimental)
+│   │   │   └── GLES3/           #   GLES3_* backend (mini-game / WebGL2)
 │   │   ├── Render/Core/         # RenderGraph, VirtualTexture, BindlessMaterial
 │   │   ├── Application/         # Window (GLFW), SampleApp, CameraController
-│   │   ├── Asset/               # MeshAsset, TextureAsset
-│   │   ├── Platform/            # Platform abstraction (Desktop, Android)
+│   │   ├── Asset/               # MeshAsset, TextureAsset, glTF loader, AssetPack
+│   │   ├── Platform/            # Platform: Desktop/Android/Emscripten/WeChat/Douyin
 │   │   ├── UI/                  # UIManager, UISystem, UIRenderer (abstract)
 │   │   │   ├── RmlUI/           #   RmlUI concrete backend
 │   │   │   └── Widget/          #   RTTR-based declarative widget framework
@@ -532,7 +577,7 @@ MXRender builds on the shoulders of these excellent projects and libraries:
 
 **Via xmake packages**: [Vulkan SDK](https://www.vulkan.org/) · [GLFW](https://www.glfw.org/) · [GLM](https://github.com/g-truc/glm) · [Dear ImGui](https://github.com/ocornut/imgui) (docking branch) · [Assimp](https://github.com/assimp/assimp) · [Boost](https://www.boost.org/) · [FlatBuffers](https://google.github.io/flatbuffers/) · [glslang](https://github.com/KhronosGroup/glslang) · [RTTR](https://github.com/rttrorg/rttr) · [nlohmann/json](https://github.com/nlohmann/json) · [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) · [GLI](https://github.com/g-truc/gli) · [LZ4](https://github.com/lz4/lz4) · [Optick](https://github.com/bombomby/optick) · [Freetype](https://www.freetype.org/)
 
-**Vendored in-tree**: [RmlUi](https://github.com/mikke89/RmlUi) · [TaskScheduler](https://github.com/dougbinks/enkiTS) · [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) · [stb_image](https://github.com/nothings/stb) · [VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) · [imgui-node-editor](https://github.com/thedmd/imgui-node-editor)
+**Vendored in-tree**: [RmlUi](https://github.com/mikke89/RmlUi) · [TaskScheduler](https://github.com/dougbinks/enkiTS) · [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) · [stb_image](https://github.com/nothings/stb) · [VulkanMemoryAllocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) · [imgui-node-editor](https://github.com/thedmd/imgui-node-editor) · [KCP](https://github.com/skywind3000/kcp) · [tinygltf](https://github.com/syoyo/tinygltf) · [Emscripten SDK](https://github.com/emscripten-core/emsdk)
 
 ### Design Inspiration
 
@@ -569,7 +614,7 @@ Editor.exe ──依赖──> Runtime.lib ──引用──> ThirdParty
 ### ✨ 核心特性
 
 **渲染硬件抽象层 (RHI)**
-- 3 个后端共存：**Vulkan**（主力，30+ 文件）· **WebGPU**（实验性，14 文件）· **GLES3**（实验性，12 文件）
+- 3 个后端共存：**Vulkan**（主力，30+ 文件）· **WGPU**（实验性，14 文件）· **GLES3**（小游戏就绪，19 文件）
 - 统一抽象命令：`CreateTexture` / `SetGraphicsPipeline` / `Draw` / `Dispatch` / `ResourceBarrier`
 - Dynamic Rendering (Vulkan 1.3) + 传统 RenderPass 自动回退
 - UE 风格 GPU 内存三级管理：DeviceMemoryManager → FragmentAllocator → ResourcePool
@@ -602,7 +647,7 @@ Editor.exe ──依赖──> Runtime.lib ──引用──> ThirdParty
 
 **多线程渲染** — Single / RHIThread / ThreeThread 可切换 + TaskScheduler 纤程调度
 
-**跨平台** — Windows (Vulkan) ✅ · Android ARM64 (Vulkan) 🧪 · WebAssembly (WebGPU/GLES3) 🧪
+**跨平台** — Windows (Vulkan) ✅ · Android ARM64 (Vulkan) 🧪 · WASM/WebGL2 ✅ · 微信小游戏 ✅ · 抖音小游戏 ✅
 
 ### 🚀 快速开始
 
@@ -624,6 +669,41 @@ xmake run RendererSample-HelloTriangle
 > **注意**：必须使用 `xmake run`，直接运行 `.exe` 会因缺少 DLL 路径而失败。
 
 Android 交叉编译请参考上方 [Android Build](#android-build-cross-compile) 章节。
+
+### 🎮 小游戏构建 (微信 / 抖音 / 浏览器)
+
+**前置条件**: Emscripten SDK 6.0.4+ 安装于 `src/ThirdParty/emsdk/`。
+
+```batch
+# 一键构建全部 3 个 WASM Sample
+build_wasm.bat
+
+# 浏览器预览
+cd build\wasm\wasm32\debug
+python -m http.server 8080
+# → http://localhost:8080/MiniGame-Mesh.html
+```
+
+**微信打包**:
+```batch
+pack\WeChat\build_pack.bat MiniGame-Mesh debug
+# 产出: pack\WeChat\dist\MiniGame-Mesh_wx\
+# → 微信开发者工具 → 导入项目 → 编译 → 预览
+```
+
+**抖音打包**:
+```batch
+pack\Douyin\build_pack.bat MiniGame-Mesh debug
+# 产出: pack\Douyin\dist\MiniGame-Mesh_tt\
+# → 抖音开发者工具 → 导入项目 → 编译 → 预览
+```
+
+**小游戏 Sample**:
+| Target | 功能 |
+|--------|------|
+| `MiniGame-HelloTriangle` | gl_VertexID 硬编码三角形 |
+| `MiniGame-Texture` | 全屏四边形 + checkerboard 纹理采样 |
+| `MiniGame-Mesh` | 旋转立方体 VBO+VAO+UBO + 鼠标/触摸轨道相机 |
 
 ### 🧪 Sample 一览
 
@@ -651,9 +731,14 @@ Android 交叉编译请参考上方 [Android Build](#android-build-cross-compile
 src/
 ├── Runtime/          # 引擎核心库
 │   ├── Core/         # 基础类型、ResourceHandle
-│   ├── RHI/          # RHI 抽象 (Vulkan/WebGPU/GLES3)
+│   ├── RHI/          # RHI 抽象 (Vulkan/WGPU/GLES3)
 │   ├── Render/Core/  # RenderGraph 系统
 │   ├── Application/  # 窗口、SampleApp 基类
+	│   ├── Asset/        # MeshAsset, TextureAsset, glTF加载器, AssetPack
+	│   ├── Platform/     # 平台抽象: Desktop/Android/Emscripten/WeChat/Douyin
+	│   ├── Network/      # 网络抽象: KCP可靠UDP
+	│   ├── Audio/        # 音频抽象: Web Audio / 微信 / 抖音
+	│   ├── Input/        # InputSystem + InputActionMap
 │   ├── UI/           # 多后端 UI 框架
 │   └── Tool/         # ShaderLibrary、BufferUtils
 ├── Editor/           # 可视化 RenderGraph 编辑器
