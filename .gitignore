@@ -43,7 +43,7 @@ CMakeFiles/
 vsxmake2019
 vsxmake2019/
 vsxmake*
-
+src/ThirdParty/emsdk/upstream/emscripten/cache/js_output
 # tinygltf examples/tests/models (keep only tiny_gltf.h + json.hpp)
 src/ThirdParty/tinygltf/examples/
 src/ThirdParty/tinygltf/tests/
