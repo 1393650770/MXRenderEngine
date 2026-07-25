@@ -4,7 +4,7 @@
 #define _VK_RESOURCE_POOL_
 
 #include "Core/ConstDefine.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "VK_Texture.h"
 #include "VK_Buffer.h"
 

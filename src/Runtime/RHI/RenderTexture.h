@@ -2,7 +2,7 @@
 
 #ifndef _RENDER_TEXTURE_
 #define _RENDER_TEXTURE_
-#include "RenderRource.h"
+#include "RenderResource.h"
 #include <vector>
 #include <string>
 

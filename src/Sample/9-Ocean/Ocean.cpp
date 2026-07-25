@@ -11,7 +11,7 @@
 #include "Application/Window.h"
 #include "Render/RenderInterface.h"
 #include "Render/Core/RenderGraph.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "Render/Core/RenderGraphPass.h"
 #include "RHI/RenderPass.h"
 #include "RHI/RenderRHI.h"

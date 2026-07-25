@@ -6,7 +6,7 @@
 #include "RHI/RenderShader.h"
 #include "RHI/RenderTexture.h"
 #include "RHI/RenderBuffer.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderPipelineState.h"
 #include "Tool/BufferUtils.h"
 

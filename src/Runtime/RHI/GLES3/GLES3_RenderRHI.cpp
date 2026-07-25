@@ -181,15 +181,15 @@ Viewport* GLES3_RenderRHI::CreateViewport(void* window_handle, Int width, Int he
 
 Shader* GLES3_RenderRHI::CreateShader(CONST ShaderDesc& desc, CONST ShaderDataPayload& data)
 {
-	// Phase 0: GLSL ES source is embedded in the shader data payload.
-	// The source is stored as a string in data.data (reinterpreted from uint32).
-	// Phase 1+: SPIRV-Cross converts SPIR-V to GLSL ES source before this point.
-
 	auto* shader = new GLES3_Shader(desc, data);
 
-	// If wgsl_source is populated (reusing the field for GLSL source until a
-	// dedicated glsl_source field is added), use it directly.
-	// Otherwise extract from spirv_data (Phase 1 SPIRV-Cross path).
+	// Auto-store GLSL source from wgsl_source field (reused for GLSL ES source
+	// in the GLES3 backend). Sample code no longer needs to manually cast to
+	// GLES3_Shader and call SetGLSLSource — the backend handles it transparently.
+	if (!data.wgsl_source.empty())
+	{
+		shader->SetGLSLSource(data.wgsl_source);
+	}
 	return shader;
 }
 

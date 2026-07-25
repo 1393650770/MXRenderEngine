@@ -1,7 +1,7 @@
 #include "ShaderLibrary.h"
 #include <fstream>
 #include "RHI/RenderRHI.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderShader.h"
 #include "RHI/RenderPipelineState.h"
 #if PLATFORM_ANDROID

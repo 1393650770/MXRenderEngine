@@ -3,7 +3,7 @@
 #define _VIEWPORT_
 #include "Core/ConstDefine.h"
 #include "RenderEnum.h"
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 
 

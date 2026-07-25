@@ -2,7 +2,7 @@
 #ifndef _RENDERPIPELINESTATE_
 #define _RENDERPIPELINESTATE_
 #include "RenderEnum.h"
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)

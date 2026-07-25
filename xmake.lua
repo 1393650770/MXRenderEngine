@@ -80,7 +80,12 @@ function PlatformSettings()
     elseif is_plat("wasm") then
         add_defines("PLATFORM_GLES3", "PLATFORM_EMSCRIPTEN")
         add_cxflags("-Wno-c++11-narrowing")
-        add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1", {force = true})
+        if is_mode("release") then
+            add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1",
+                "-Oz", "-flto", "-sASSERTIONS=0", {force = true})
+        else
+            add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1", {force = true})
+        end
     end
 end
 
@@ -97,11 +102,12 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
     elseif is_plat("wasm") then
         remove_files("src/Runtime/RHI/Vulkan/**")
-        remove_files("src/Runtime/RHI/WebGPU/**")
+        remove_files("src/Runtime/RHI/WGPU/**")
         remove_files("src/Runtime/Platform/Win/**")
         remove_files("src/Runtime/Platform/Android/**")
-        remove_files("src/Runtime/Platform/WGPU/**.cpp")
-        remove_files("src/Runtime/Platform/Desktop/**.cpp")
+        remove_files("src/Runtime/Platform/WGPU/**.cpp")  -- legacy path
+        remove_files("src/Runtime/Platform/Desktop/**.cpp")  -- GLFW not on wasm
+        remove_files("src/Runtime/Platform/Emscripten/EmscriptenWGPUWindow.cpp")  -- WebGPU backend (keep GLES3)
         remove_files("src/Runtime/Tool/MeshLoader.cpp")
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
         remove_files("src/Runtime/Core/ReflectionRegister.cpp")  -- depends on rttr
@@ -127,7 +133,7 @@ function CommonLibrarySetting()
     else
         remove_files("src/Runtime/Platform/Android/**.cpp")
         remove_files("src/Runtime/Platform/WGPU/**.cpp")
-        remove_files("src/Runtime/RHI/WebGPU/**")
+        remove_files("src/Runtime/RHI/WGPU/**")
     end
     -- Platform-specific file dialog: exclude the wrong platform implementation
     if is_plat("windows") then

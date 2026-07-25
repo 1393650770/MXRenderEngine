@@ -45,7 +45,8 @@ protected:
 	UInt32 m_width = 0;
 	UInt32 m_height = 0;
 
-	GLES3_Texture* m_backbuffer_tex = nullptr;  // wraps the default framebuffer
+	GLES3_Texture* m_backbuffer_tex = nullptr;  // wraps the default framebuffer color
+	GLES3_Texture* m_depth_tex = nullptr;       // wraps the default framebuffer depth/stencil
 private:
 #pragma endregion
 

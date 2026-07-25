@@ -155,18 +155,125 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Core\TypeHash.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Android\AndroidEntry.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Android\AndroidWindow.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Android\TouchOrbitCamera.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Desktop\DesktopNetwork.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Network\NetworkSystem.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Network\KCP\KCPSocket.h \
+  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\map \
+  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\xtree \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winsock2.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\winapifamily.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\winpackagefamily.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\windows.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\sdkddkver.h \
+  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\excpt.h \
+  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\stdarg.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\windef.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\minwindef.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\specstrings.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\specstrings_strict.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\specstrings_undef.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\driverspecs.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\sdv_driverspecs.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winnt.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\kernelspecs.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\basetsd.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\guiddef.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\pshpack4.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\poppack.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\pshpack2.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\pshpack8.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\pshpack1.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\apiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\ktmtypes.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winbase.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\apisetcconv.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\minwinbase.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\apiquery2.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\processenv.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\fileapifromapp.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\fileapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\debugapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\utilapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\handleapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\errhandlingapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\fibersapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\namedpipeapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\profileapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\heapapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\ioapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\synchapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\interlockedapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\processthreadsapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\sysinfoapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\memoryapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\enclaveapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\threadpoollegacyapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\threadpoolapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\jobapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\jobapi2.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\wow64apiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\libloaderapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\securitybaseapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\namespaceapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\systemtopologyapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\processtopologyapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\securityappcontainer.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\realtimeapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\winerror.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\timezoneapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\wingdi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winuser.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\tvout.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winnls.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\datetimeapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\stringapiset.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\wincon.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\wincontypes.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\consoleapi.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\consoleapi2.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\consoleapi3.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winver.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\verrsrc.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winreg.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\reason.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winnetwk.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\wnnc.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\stralign.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\winsvc.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\mcx.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\imm.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\ime_cmodes.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\ws2def.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\inaddr.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\qos.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\um\ws2tcpip.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\ws2ipdef.h \
+  C:\Program\ Files\ (x86)\Windows\ Kits\10\Include\10.0.26100.0\shared\in6addr.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Desktop\DesktopWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformWindow.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Douyin\DouyinAudio.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Douyin\DouyinFileIO.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\BrowserAsyncFileIO.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\BrowserCamera.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\BrowserFileIO.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\BrowserNetwork.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\EmscriptenGLWindow.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\EmscriptenWGPUWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileDialog.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileSystem.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\GLES3\EmscriptenGLWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Platform.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformAsyncFileIO.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformAudio.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Audio\AudioSystem.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformDebug.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\cstdarg \
-  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\stdarg.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\WGPU\EmscriptenWindow.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformFileIO.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\WeChat\WeChatAudio.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\WeChat\WeChatFileIO.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\FileSystem\BasicFileSystem.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\FileSystem\Win\WinFileSystem.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\glTF\glTFLoader.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\MeshAsset.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\RHIHandleTypes.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\future \
@@ -185,11 +292,13 @@ parser_header.o: \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\ppltaskscheduler.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\pplcancellation_token.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\TextureAsset.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\Wasm\AssetPackReader.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Asset\Wasm\WasmTextureLoader.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\BufferUtils.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\RenderEnum.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\ComputeUtils.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\MeshLoader.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\RenderRource.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\RHI\RenderResource.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\ShaderLibrary.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\TextureLoader.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Tool\ToolUtils.h \
@@ -209,8 +318,6 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Tween.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\Types.h \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\..\Config\Config.h \
-  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\map \
-  D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\xtree \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\..\Config\..\Core\Containers\itlib\flat_map.hpp \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\..\Config\..\Core\Containers\itlib\flat_set.hpp \
   D:\Project\GameDevelop\MyRenderer\src\ThirdParty\RmlUi\Include\RmlUi\Core\..\Config\..\Core\Containers\robin_hood.h \
@@ -290,10 +397,10 @@ parser_header.o: \
   rttr\type.h rttr\variant.h rttr\property.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\Widget\UIWidgetMacros.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\Widget\UIWidgetManager.h \
-  D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\Android\TouchOrbitCamera.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\CameraController.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Render\View\SceneView.h \
   glm\glm.hpp glm\gtc\matrix_transform.hpp \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\MiniGameCamera.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\SampleApp.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Render\RenderInterface.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\Window.h \

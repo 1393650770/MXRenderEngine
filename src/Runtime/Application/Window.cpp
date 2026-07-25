@@ -4,10 +4,10 @@
 #include "Platform/Android/AndroidWindow.h"
 #endif
 #if PLATFORM_WGPU
-#include "Platform/WGPU/EmscriptenWindow.h"
+#include "Platform/Emscripten/EmscriptenWGPUWindow.h"
 #endif
 #if PLATFORM_GLES3
-#include "Platform/GLES3/EmscriptenGLWindow.h"
+#include "Platform/Emscripten/EmscriptenGLWindow.h"
 #endif
 
 #include <iostream>

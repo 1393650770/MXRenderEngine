@@ -6,7 +6,7 @@
 #include "Core/ConstDefine.h"
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderShader.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/ResourceManager.h"
 
 namespace MXNN {

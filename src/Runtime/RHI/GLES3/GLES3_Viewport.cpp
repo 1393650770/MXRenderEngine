@@ -25,6 +25,13 @@ GLES3_Viewport::GLES3_Viewport(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx, UInt32 width
 	m_backbuffer_tex = new GLES3_Texture(tex_desc);
 	m_backbuffer_tex->SetAsDefaultFramebuffer();
 
+	TextureDesc ds_desc;
+	ds_desc.width = width; ds_desc.height = height;
+	ds_desc.format = ENUM_TEXTURE_FORMAT::D24S8;
+	ds_desc.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D_DEPTH;
+	m_depth_tex = new GLES3_Texture(ds_desc);
+	m_depth_tex->SetAsDefaultFramebuffer();
+
 	// Set initial viewport
 	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 	glScissor(0, 0, (GLsizei)width, (GLsizei)height);
@@ -35,18 +42,18 @@ GLES3_Viewport::GLES3_Viewport(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx, UInt32 width
 GLES3_Viewport::~GLES3_Viewport()
 {
 	if (m_backbuffer_tex) { delete m_backbuffer_tex; m_backbuffer_tex = nullptr; }
+	if (m_depth_tex) { delete m_depth_tex; m_depth_tex = nullptr; }
 }
 
 Texture* GLES3_Viewport::GetCurrentBackBufferRTV()
 {
-	// Default framebuffer: width/height metadata are informational only
 	return m_backbuffer_tex;
 }
 
 Texture* GLES3_Viewport::GetCurrentBackBufferDSV()
 {
-	// Phase 0: no depth buffer (PSO created without depth attachment)
-	return nullptr;
+	// Default FBO has implicit depth/stencil from WebGL context creation attrs
+	return m_depth_tex;
 }
 
 Vector<UInt32> GLES3_Viewport::GetViewportSize() CONST

@@ -6,7 +6,7 @@
 #include "RHI/RenderEnum.h"
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderShader.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 // --  
 #include "ShaderHelper.h"
 // --   VK_Shader.h removed - FlushDescriptorWrites now on RHI base class

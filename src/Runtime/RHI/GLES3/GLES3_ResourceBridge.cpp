@@ -7,7 +7,7 @@
 // Phase 2+ can add a GLES3 resource pool if profiling shows allocation overhead.
 
 #include "RHI/RenderRHI.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderTexture.h"
 #include "RHI/RenderBuffer.h"
 #include "Core/ConstDefine.h"

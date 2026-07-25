@@ -1,0 +1,12 @@
+{
+  "description": "MyRenderer Douyin MiniGame",
+  "compileType": "game",
+  "appid": "tt0000000000000000",
+  "projectname": "MyRenderer-MiniGame",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "postcss": true,
+    "minified": false
+  }
+}

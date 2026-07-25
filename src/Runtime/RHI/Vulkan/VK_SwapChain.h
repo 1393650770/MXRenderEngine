@@ -6,7 +6,7 @@
 #include <vulkan/vulkan.h>
 #include <memory>
 #include <vector>
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)

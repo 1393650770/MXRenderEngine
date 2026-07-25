@@ -2,7 +2,7 @@
 #ifndef _VK_QUEUE_
 #define _VK_QUEUE_
 #include <vulkan/vulkan_core.h>
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 
 
 

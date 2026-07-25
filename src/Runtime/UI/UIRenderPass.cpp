@@ -2,7 +2,7 @@
 #include "UIRenderer.h"
 #include "RHI/RenderCommandList.h"
 #include "RHI/RenderRHI.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderTexture.h"
 #include "Render/Core/RenderGraphPass.h"
 #include "Render/Core/RenderGraphResource.h"

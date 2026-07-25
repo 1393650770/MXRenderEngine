@@ -14,6 +14,9 @@
 #include "RHI/GLES3/GLES3_PipelineState.h"
 #include "RHI/GLES3/GLES3_Texture.h"
 #include "RHI/GLES3/GLES3_ShaderResourceBinding.h"
+#include "Application/MiniGameCamera.h"
+#include "Platform/Emscripten/BrowserCamera.h"
+#include "Render/View/SceneView.h"
 #include <cstring>
 #include <cmath>
 #include <iostream>
@@ -103,42 +106,12 @@ protected:
 private:
 #pragma endregion
 
-	GLES3::GLES3_Buffer* m_vb = nullptr;
-	GLES3::GLES3_Texture* m_texture = nullptr;
-	GLES3::GLES3_Buffer* m_ub = nullptr;
-	float m_angle = 0.0f;
+	RHI::Buffer* m_vb = nullptr;
+	RHI::Texture* m_texture = nullptr;
+	RHI::Buffer* m_ub = nullptr;
+	Platform::Emscripten::BrowserCamera m_camera;
+	Render::SceneView m_scene_view;
 MYRENDERER_END_CLASS
-
-// Simple lookAt + perspective matrix (avoiding glm dependency for standalone wasm)
-static void BuildMVP(float* out, float angle, float aspect)
-{
-	// Identity + rotation around Y
-	float c = cosf(angle), s = sinf(angle);
-	float rot[16] = {c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1};
-
-	// Perspective proj: fov 60, near 1, far 100
-	float f = 1.0f / tanf(1.0472f * 0.5f);
-	float proj[16] = {
-		f/aspect,0,0,0,
-		0,f,0,0,
-		0,0,(100+1)/(1-100),-1,
-		0,0,(2*100*1)/(1-100),0
-	};
-
-	// View: camera at (0,0,6) looking at origin
-	float view[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-6,1};
-
-	// MVP = proj * view * rot (column-major multiply)
-	float t[16];
-	for (int i=0;i<4;++i) for (int j=0;j<4;++j) {
-		t[i+j*4] = 0;
-		for (int k=0;k<4;++k) t[i+j*4] += view[i+k*4] * rot[k+j*4];
-	}
-	for (int i=0;i<4;++i) for (int j=0;j<4;++j) {
-		out[i+j*4] = 0;
-		for (int k=0;k<4;++k) out[i+j*4] += proj[i+k*4] * t[k+j*4];
-	}
-}
 
 static void BuildCheckerboard(UInt32* pixels, UInt32 w, UInt32 h, UInt32 tile)
 {
@@ -156,14 +129,16 @@ void MiniGameMesh::OnInitScene()
 	BufferDesc vb_desc;
 	vb_desc.size = sizeof(g_cube_verts);
 	vb_desc.type = ENUM_BUFFER_TYPE::Vertex;
-	m_vb = static_cast<GLES3::GLES3_Buffer*>(g_render_rhi->CreateBuffer(vb_desc));
-	m_vb->SetData(g_cube_verts, sizeof(g_cube_verts));
+	m_vb = g_render_rhi->CreateBuffer(vb_desc);
+	{   void* ptr = g_render_rhi->MapBuffer(m_vb, ENUM_MAP_TYPE::Write, ENUM_MAP_FLAG::None);
+		memcpy(ptr, g_cube_verts, sizeof(g_cube_verts));
+		g_render_rhi->UnmapBuffer(m_vb); }
 
 	// ---- Uniform buffer (MVP matrix) ----
 	BufferDesc ub_desc;
 	ub_desc.size = sizeof(MVPBlock);
 	ub_desc.type = ENUM_BUFFER_TYPE::Uniform;
-	m_ub = static_cast<GLES3::GLES3_Buffer*>(g_render_rhi->CreateBuffer(ub_desc));
+	m_ub = g_render_rhi->CreateBuffer(ub_desc);
 
 	// ---- Texture (64x64 checkerboard) ----
 	const UInt32 tw = 64, th = 64;
@@ -175,27 +150,30 @@ void MiniGameMesh::OnInitScene()
 	tex_desc.format = ENUM_TEXTURE_FORMAT::RGBA8;
 	tex_desc.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
 	tex_desc.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
-	m_texture = static_cast<GLES3::GLES3_Texture*>(g_render_rhi->CreateTexture(tex_desc));
-	GLuint gl_tex = m_texture->GetGLTexture();
-	if (gl_tex) {
+	m_texture = g_render_rhi->CreateTexture(tex_desc);
+	{   // Texture data upload (will be abstracted via RHI in C2)
+		auto* gl_tex_obj = static_cast<GLES3::GLES3_Texture*>(m_texture);
+		GLuint gl_tex = gl_tex_obj->GetGLTexture();
+		if (gl_tex) {
 		glBindTexture(GL_TEXTURE_2D, gl_tex);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)tw, (GLsizei)th,
 			GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
+	} // end texture upload scope
 
 	// ---- Shaders ----
 	ShaderDesc vs_desc; vs_desc.shader_type = ENUM_SHADER_STAGE::Shader_Vertex;
 	vs_desc.debug_name = "mesh_vs";
 	ShaderDataPayload vs_payload; vs_payload.wgsl_source = g_mesh_vs;
 	Shader* vs = RHICreateShader(vs_desc, vs_payload);
-	static_cast<GLES3::GLES3_Shader*>(vs)->SetGLSLSource(g_mesh_vs);
+	// GLSL source auto-stored by GLES3_RenderRHI::CreateShader (from wgsl_source field)
 
 	ShaderDesc fs_desc; fs_desc.shader_type = ENUM_SHADER_STAGE::Shader_Pixel;
 	fs_desc.debug_name = "mesh_fs";
 	ShaderDataPayload fs_payload; fs_payload.wgsl_source = g_mesh_fs;
 	Shader* fs = RHICreateShader(fs_desc, fs_payload);
-	static_cast<GLES3::GLES3_Shader*>(fs)->SetGLSLSource(g_mesh_fs);
+	// fs GLSL source auto-stored by CreateShader
 
 	// ---- RenderGraph pass ----
 	auto* rdg_pass = graph.AddRenderPass<MeshPassData>("MeshPass", &graph, RHIGetImmediateCommandList(),
@@ -232,10 +210,13 @@ void MiniGameMesh::OnInitScene()
 		{
 			BindBackBufferTarget(in_cmd_list);
 
-			// Update MVP uniform buffer each frame
+			// Upload MVP matrix from SceneView
+			CONST auto& vp = m_scene_view.GetViewProjectionMatrix();
 			MVPBlock mvp;
-			BuildMVP(mvp.mvp, m_angle, 1.0f);
-			m_ub->SetData(&mvp, sizeof(MVPBlock));
+			memcpy(mvp.mvp, &vp[0][0], sizeof(mvp.mvp));
+			{   void* ptr = g_render_rhi->MapBuffer(m_ub, ENUM_MAP_TYPE::Write, ENUM_MAP_FLAG::None);
+				memcpy(ptr, &mvp, sizeof(MVPBlock));
+				g_render_rhi->UnmapBuffer(m_ub); }
 
 			in_cmd_list->SetGraphicsPipeline(data.pso);
 			in_cmd_list->SetShaderResourceBinding(data.srb);
@@ -254,8 +235,8 @@ void MiniGameMesh::OnInitScene()
 
 void MiniGameMesh::OnUpdate(Float32 dt)
 {
-	m_angle += dt * 1.5f;  // ~90 degrees/sec
-	if (m_angle > 6.283185f) m_angle -= 6.283185f;
+	// Update camera from mouse/touch input
+	m_camera.Update(dt, 1280, 960, m_scene_view);
 }
 
 void MiniGameMesh::OnShutdownScene()

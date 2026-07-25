@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 #include "RenderRHI.h"
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)

@@ -6,7 +6,7 @@
 #include "Render/Core/RenderGraphDefinition.h"
 #include "Render/Core/RenderGraph.h"
 #include "Render/Core/RenderGraphResource.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderEnum.h"
 #include "RHI/RenderTexture.h"

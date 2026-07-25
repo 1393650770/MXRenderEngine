@@ -13,7 +13,7 @@
 #include "Render/Core/RenderGraph.h"
 #include "Render/Core/RenderGraphPass.h"
 #include "RHI/RenderRHI.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderCommandList.h"
 #include "RHI/RenderPipelineState.h"
 #include "RHI/RenderBuffer.h"

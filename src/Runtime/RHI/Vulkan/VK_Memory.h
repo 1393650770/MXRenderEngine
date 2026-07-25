@@ -4,7 +4,7 @@
 
 #include <vulkan/vulkan_core.h>
 #include "Core/ConstDefine.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 
 #define VULKAN_MEMORY_LOW_PRIORITY 0.f
 #define VULKAN_MEMORY_MEDIUM_PRIORITY 0.5f

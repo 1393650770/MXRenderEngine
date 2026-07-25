@@ -1,7 +1,7 @@
 #pragma once
 #ifndef _FRAMEBUFFER_
 #define _FRAMEBUFFER_
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)

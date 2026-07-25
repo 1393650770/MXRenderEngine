@@ -4,7 +4,7 @@
 
 #include "Core/ConstDefine.h"
 #include <variant>
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Render)

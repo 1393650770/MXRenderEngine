@@ -6,7 +6,7 @@
 #include <string>
 #include<vector>
 #include<memory>
-#include "RenderRource.h"
+#include "RenderResource.h"
 #include "Core/ConstGlobals.h"
 #include "RenderBindlessManager.h"
 #include "RHIHandleTypes.h"

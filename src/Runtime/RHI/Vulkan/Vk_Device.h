@@ -4,7 +4,7 @@
 #define _VK_DEVICE_
 #include <vulkan/vulkan.h>
 #include "Core/ConstDefine.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "VK_RenderRHI.h"
 #include "VK_Memory.h"
 #include "VK_Extension.h"

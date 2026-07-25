@@ -15,8 +15,11 @@ echo === Checking emcc ===
 emcc.bat --version 2>&1 | findstr /C:"emcc"
 echo.
 
-echo === Configuring xmake for wasm ===
-xmake f -p wasm -a wasm32 -m debug -y
+set "MODE=%~1"
+if "%MODE%"=="" set "MODE=debug"
+
+echo === Configuring xmake for wasm (%MODE%) ===
+xmake f -p wasm -a wasm32 -m %MODE% -y
 if %ERRORLEVEL% NEQ 0 (
     echo === Configure FAILED ===
     exit /b 1

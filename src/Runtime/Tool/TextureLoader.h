@@ -2,7 +2,7 @@
 #ifndef _TEXTURELOADER_
 #define _TEXTURELOADER_
 #include "Core/ConstDefine.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include <atomic>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)

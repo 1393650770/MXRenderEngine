@@ -1,7 +1,7 @@
 #pragma once
 #ifndef _RENDERPASS_
 #define _RENDERPASS_
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 
 

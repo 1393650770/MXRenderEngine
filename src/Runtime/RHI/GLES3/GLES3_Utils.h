@@ -170,6 +170,29 @@ inline GLenum TranslateBlendEquation(ENUM_BLEND_EQUATION eq)
 	}
 }
 
+// ---- Compressed Texture Format Translation ----
+// GLES 3.0 core requires ETC2/EAC support. ASTC is via extension.
+
+inline GLenum TranslateCompressedFormat_Internal(ENUM_TEXTURE_FORMAT fmt)
+{
+	switch (fmt)
+	{
+	// ETC2 (GLES 3.0 core)
+	case ENUM_TEXTURE_FORMAT::ETC1:  return GL_ETC1_RGB8_OES;
+	case ENUM_TEXTURE_FORMAT::ETC2:  return GL_COMPRESSED_RGB8_ETC2;
+	case ENUM_TEXTURE_FORMAT::ETC2A: return GL_COMPRESSED_RGBA8_ETC2_EAC;
+	case ENUM_TEXTURE_FORMAT::ETC2A1:return GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2;
+	// ASTC (extension: WEBGL_compressed_texture_astc)
+	case ENUM_TEXTURE_FORMAT::ASTC4x4:  return 0x93B0; // GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+	case ENUM_TEXTURE_FORMAT::ASTC5x5:  return 0x93B1;
+	case ENUM_TEXTURE_FORMAT::ASTC6x6:  return 0x93B2;
+	case ENUM_TEXTURE_FORMAT::ASTC8x5:  return 0x93B3;
+	case ENUM_TEXTURE_FORMAT::ASTC8x6:  return 0x93B4;
+	case ENUM_TEXTURE_FORMAT::ASTC10x5: return 0x93B5;
+	default: return 0;
+	}
+}
+
 MYRENDERER_END_NAMESPACE  // GLES3
 MYRENDERER_END_NAMESPACE  // RHI
 MYRENDERER_END_NAMESPACE  // MXRender

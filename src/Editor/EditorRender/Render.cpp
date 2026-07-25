@@ -11,7 +11,7 @@
 #include "RHI/RenderViewport.h"
 #include "RHI/RenderTexture.h"
 #include "RHI/RenderCommandList.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include "RHI/RenderBuffer.h"
 #include "RHI/RenderUtils.h"
 #include "UI/RenderGraphEditor/Panels/RenderGraphPanel.h"

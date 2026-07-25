@@ -6,7 +6,7 @@
 #include "Core/ResourceHandle.h"
 #include "Core/ResourceRegistry.h"
 #include "RHIHandleTypes.h"
-#include "RenderRource.h"
+#include "RenderResource.h"
 #include "RenderTexture.h"
 #include "RenderBuffer.h"
 #include "RenderShader.h"

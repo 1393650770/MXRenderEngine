@@ -3,7 +3,7 @@
 #define _MESHLOADER_
 #include "Core/ConstDefine.h"
 #include "RHI/RenderEnum.h"
-#include "RHI/RenderRource.h"
+#include "RHI/RenderResource.h"
 #include <atomic>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)

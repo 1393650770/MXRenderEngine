@@ -4,7 +4,7 @@
 
 #include "RenderEnum.h"
 #include "Core/ConstDefine.h"
-#include "RenderRource.h"
+#include "RenderResource.h"
 
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
