@@ -80,6 +80,24 @@ try {
 }
 
 // ---- Step 4: Configure Emscripten Module ----
+// In mini-game, each module has its own isolated global.
+// We intercept WebAssembly.instantiate to capture WASM exports
+// into OUR Module, bypassing the scope isolation.
+var _origInstantiate = WebAssembly.instantiate;
+WebAssembly.instantiate = function(buf, imports) {
+  return _origInstantiate.call(WebAssembly, buf, imports).then(function(result) {
+    var e = result.instance.exports;
+    // Map WASM exports to our Module so touch handlers can call them
+    if (e.mx_feed_mouse_move) Module._mx_feed_mouse_move = function(x,y){ e.mx_feed_mouse_move(x,y); };
+    if (e.mx_feed_mouse_down)  Module._mx_feed_mouse_down  = function(b){ e.mx_feed_mouse_down(b); };
+    if (e.mx_feed_mouse_up)    Module._mx_feed_mouse_up    = function(b){ e.mx_feed_mouse_up(b); };
+    if (e.mx_feed_scroll)      Module._mx_feed_scroll      = function(d){ e.mx_feed_scroll(d); };
+    if (e.mx_set_canvas_size)  Module._mx_set_canvas_size  = function(w,h){ e.mx_set_canvas_size(w,h); };
+    console.log('[game.js] WASM exports intercepted');
+    return result;
+  });
+};
+
 var Module = {
   canvas: canvas,
   wasmBinaryFile: 'mxrender.wasm',
@@ -96,34 +114,28 @@ console.log('[game.js] Loading mxrender.js...');
 require('./mxrender.js');
 
 // ---- Input bridge: touch → mouse emulation ----
-// Register early (WASM exports become real after async instantiation).
-// Each handler checks the function exists before calling (may be
-// a stub during the brief window between script load and WASM init).
-function registerTouchBridge() {
-  if (typeof Module._mx_feed_mouse_move !== 'function') {
-    // WASM not ready yet — retry on next frame
-    setTimeout(registerTouchBridge, 50);
-    return;
-  }
-  realTT.onTouchStart(function(e) {
-    if (!e.touches || !e.touches.length) return;
-    var t = e.touches[0];
-    Module._mx_feed_mouse_move(t.clientX, t.clientY);
-    Module._mx_feed_mouse_down(0);
-  });
-  realTT.onTouchMove(function(e) {
-    if (!e.touches || !e.touches.length) return;
-    var t = e.touches[0];
-    Module._mx_feed_mouse_move(t.clientX, t.clientY);
-  });
-  realTT.onTouchEnd(function(e) {
-    Module._mx_feed_mouse_up(0);
-  });
-  realTT.onTouchCancel(function(e) {
-    Module._mx_feed_mouse_up(0);
-  });
-  console.log('[game.js] Input bridge ready');
-}
-registerTouchBridge();
+// Module is now on globalThis (set in Step 4), so mxrender.js shares
+// the same Module object and _mx_feed_* exports will be assigned here.
+// Until WASM init completes, they are stubs that throw — try/catch
+// silently handles the transition.
+realTT.onTouchStart(function(e) {
+  if (!e.touches || !e.touches.length) return;
+  var t = e.touches[0];
+  console.log('[touch]', t.clientX, t.clientY);
+  try { Module._mx_feed_mouse_move(t.clientX, t.clientY); } catch(e) { console.log('[touch] err:', e.message); }
+  try { Module._mx_feed_mouse_down(0); } catch(e) {}
+});
+realTT.onTouchMove(function(e) {
+  if (!e.touches || !e.touches.length) return;
+  var t = e.touches[0];
+  try { Module._mx_feed_mouse_move(t.clientX, t.clientY); } catch(e) {}
+});
+realTT.onTouchEnd(function(e) {
+  try { Module._mx_feed_mouse_up(0); } catch(e) {}
+});
+realTT.onTouchCancel(function(e) {
+  try { Module._mx_feed_mouse_up(0); } catch(e) {}
+});
+console.log('[game.js] Input bridge registered');
 
 console.log('[game.js] Done.');
