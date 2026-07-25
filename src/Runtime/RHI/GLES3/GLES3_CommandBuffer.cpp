@@ -44,7 +44,7 @@ void GLES3_CommandBuffer::ApplyViewportScissor(Texture* rt)
 	Int w = m_fbo_width, h = m_fbo_height;
 	if (rt)
 	{
-		CONST auto& desc = rt->GetDesc();
+		CONST auto& desc = rt->GetTextureDesc();
 		w = (Int)desc.width;
 		h = (Int)desc.height;
 	}
@@ -78,7 +78,7 @@ void GLES3_CommandBuffer::SetRenderTarget(CONST Vector<Texture*>& render_targets
 		{
 			fbo = gl_tex->GetGLFramebuffer();
 		}
-		CONST auto& desc = render_targets[0]->GetDesc();
+		CONST auto& desc = render_targets[0]->GetTextureDesc();
 		fbo_w = desc.width;
 		fbo_h = desc.height;
 	}
@@ -155,11 +155,11 @@ void GLES3_CommandBuffer::SetComputePipeline(RenderPipelineState* pipeline_state
 
 void GLES3_CommandBuffer::SetShaderResourceBinding(ShaderResourceBinding* srb)
 {
-	// HelloTriangle: SRB is empty (no resources bound). No-op.
 	if (!srb) return;
 
+	GLuint program = m_current_graphics_pso ? m_current_graphics_pso->GetGLProgram() : 0;
 	auto* gl_srb = static_cast<GLES3_ShaderResourceBinding*>(srb);
-	gl_srb->ApplyBindings();
+	gl_srb->ApplyBindings(program);
 }
 
 #pragma endregion
@@ -170,13 +170,48 @@ void GLES3_CommandBuffer::Draw(CONST DrawAttribute& draw_attr)
 {
 	CHECK_WITH_LOG(m_current_graphics_pso == nullptr, "GLES3: Draw called without pipeline");
 
-	GLenum topology = TranslatePrimitiveTopology(m_current_graphics_pso->GetDesc().primitive_topology);
+	// Apply vertex attributes from PSO layout using the bound VBOs.
+	// GLES 3.0: use glVertexAttribPointer (compatibility path; glBindVertexBuffer
+	// is ES 3.1+ only).
+	CONST auto& layout = m_current_graphics_pso->GetPSODesc().vertex_input_layout;
+	if (!layout.empty() && m_bound_vbs[0].buf)
+	{
+		// Bind the VBO for slot 0
+		glBindBuffer(GL_ARRAY_BUFFER, m_bound_vbs[0].buf);
+
+		for (UInt32 i = 0; i < layout.size(); ++i)
+		{
+			CONST auto& elem = layout[i];
+			GLint size = 4;
+			GLenum type = GL_FLOAT;
+			GLboolean normalized = GL_FALSE;
+
+			switch (elem.attribute_format)
+			{
+			case ENUM_TEXTURE_FORMAT::R32F:    size = 1; type = GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RG32F:   size = 2; type = GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RGBA32F: size = 4; type = GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RGBA8:   size = 4; type = GL_UNSIGNED_BYTE; normalized = GL_TRUE; break;
+			default: break;
+			}
+
+			glEnableVertexAttribArray((GLuint)elem.location);
+			glVertexAttribPointer((GLuint)elem.location, size, type, normalized,
+				(GLsizei)m_bound_vbs[elem.binding].stride,
+				(const void*)(uintptr_t)(elem.offset + m_bound_vbs[elem.binding].offset));
+		}
+	}
+
+	GLenum topology = TranslatePrimitiveTopology(m_current_graphics_pso->GetPrimitiveTopology());
 	glDrawArrays(topology, (GLint)draw_attr.firstVertex, (GLsizei)draw_attr.vertexCount);
+
+	// Cleanup vertex attrib arrays
+	for (UInt32 i = 0; i < layout.size(); ++i)
+		glDisableVertexAttribArray((GLuint)layout[i].location);
 }
 
 void GLES3_CommandBuffer::Dispatch(UInt32 groupX, UInt32 groupY, UInt32 groupZ)
 {
-	// GLES 3.0 doesn't support compute shaders (requires ES 3.1+)
 	(void)groupX; (void)groupY; (void)groupZ;
 }
 
@@ -188,37 +223,73 @@ void GLES3_CommandBuffer::SetVertexBuffer(Buffer* buffer, UInt32 slot, UInt32 st
 {
 	auto* gl_buf = static_cast<GLES3_Buffer*>(buffer);
 	if (!gl_buf || !gl_buf->GetGLBuffer()) return;
-	glBindBuffer(GL_ARRAY_BUFFER, gl_buf->GetGLBuffer());
-	// VertexAttribPointer is set during pipeline creation (VAO).
-	// For Phase 1+, we'll store the layout and apply it here.
-	(void)slot; (void)stride; (void)offset;
+
+	if (slot < 4)
+	{
+		m_bound_vbs[slot].buf = gl_buf->GetGLBuffer();
+		m_bound_vbs[slot].stride = stride;
+		m_bound_vbs[slot].offset = offset;
+	}
 }
 
 void GLES3_CommandBuffer::SetIndexBuffer(Buffer* buffer, UInt32 offset, Bool index32)
 {
 	auto* gl_buf = static_cast<GLES3_Buffer*>(buffer);
 	if (!gl_buf || !gl_buf->GetGLBuffer()) return;
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl_buf->GetGLBuffer());
+
+	// Bind IBO to GL_ELEMENT_ARRAY_BUFFER — this binding is captured by the
+	// current VAO (glBindVertexArray must be called before this, or we need
+	// to store the IBO and bind it at draw time).
+	m_current_ibo = gl_buf->GetGLBuffer();
 	m_current_index_type = index32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
 	m_current_index_offset = offset;
 }
 
-void GLES3_CommandBuffer::DrawIndexed(UInt32 indexCount, UInt32 instanceCount, UInt32 firstIndex, UInt32 vertexOffset, UInt32 firstInstance)
+void GLES3_CommandBuffer::DrawIndexed(UInt32 indexCount, UInt32 instanceCount,
+                                       UInt32 firstIndex, UInt32 vertexOffset, UInt32 firstInstance)
 {
 	CHECK_WITH_LOG(m_current_graphics_pso == nullptr, "GLES3: DrawIndexed called without pipeline");
 
-	GLenum topology = TranslatePrimitiveTopology(m_current_graphics_pso->GetDesc().primitive_topology);
-	GLenum index_type = m_current_index_type ? m_current_index_type : GL_UNSIGNED_SHORT;
-	size_t idx_offset = (size_t)firstIndex * (index_type == GL_UNSIGNED_INT ? 4 : 2);
+	// Apply vertex attributes using the PSO layout (GLES 3.0 compatibility path)
+	CONST auto& layout = m_current_graphics_pso->GetPSODesc().vertex_input_layout;
+	if (!layout.empty() && m_bound_vbs[0].buf)
+	{
+		glBindBuffer(GL_ARRAY_BUFFER, m_bound_vbs[0].buf);
+		for (UInt32 i = 0; i < layout.size(); ++i)
+		{
+			CONST auto& elem = layout[i];
+			GLint size = 4; GLenum type = GL_FLOAT; GLboolean norm = GL_FALSE;
+			switch (elem.attribute_format)
+			{
+			case ENUM_TEXTURE_FORMAT::R32F:    size=1; type=GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RG32F:   size=2; type=GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RGBA32F: size=4; type=GL_FLOAT; break;
+			case ENUM_TEXTURE_FORMAT::RGBA8:   size=4; type=GL_UNSIGNED_BYTE; norm=GL_TRUE; break;
+			default: break;
+			}
+			glEnableVertexAttribArray((GLuint)elem.location);
+			glVertexAttribPointer((GLuint)elem.location, size, type, norm,
+				(GLsizei)m_bound_vbs[elem.binding].stride,
+				(const void*)(uintptr_t)(elem.offset + m_bound_vbs[elem.binding].offset));
+		}
+	}
+
+	// Bind index buffer
+	if (m_current_ibo)
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_current_ibo);
+
+	GLenum topology = TranslatePrimitiveTopology(m_current_graphics_pso->GetPrimitiveTopology());
+	size_t idx_offset = (size_t)firstIndex * (m_current_index_type == GL_UNSIGNED_INT ? 4 : 2);
 
 	if (instanceCount > 1)
 	{
-		glDrawElementsInstanced(topology, (GLsizei)indexCount, index_type,
+		glDrawElementsInstanced(topology, (GLsizei)indexCount, m_current_index_type,
 			(const void*)idx_offset, (GLsizei)instanceCount);
 	}
 	else
 	{
-		glDrawElements(topology, (GLsizei)indexCount, index_type, (const void*)idx_offset);
+		glDrawElements(topology, (GLsizei)indexCount, m_current_index_type,
+			(const void*)idx_offset);
 	}
 
 	(void)vertexOffset; (void)firstInstance;

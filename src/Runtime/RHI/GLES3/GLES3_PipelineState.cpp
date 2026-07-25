@@ -27,16 +27,16 @@ void GLES3_PipelineState::CreateShaderResourceBinding(ShaderResourceBinding*& ou
 
 void GLES3_PipelineState::ApplyState(GLboolean depth_write) CONST
 {
-	CONST auto& ds = m_desc.depth_stencil_state;
-	CONST auto& rs = m_desc.rasterizer_state;
-	CONST auto& bs = m_desc.blender_state;
+	CONST auto& ds = desc.depth_stencil_state;
+	CONST auto& rs = desc.raster_state;
+	CONST auto& bs = desc.blend_state;
 
 	// Depth/Stencil
-	if (ds.depth_enable)
+	if (ds.depth_test_enable)
 	{
 		glEnable(GL_DEPTH_TEST);
 		glDepthFunc(TranslateDepthFunction(ds.depth_func));
-		glDepthMask(ds.write_enable ? GL_TRUE : GL_FALSE);
+		glDepthMask(ds.depth_write_enable ? GL_TRUE : GL_FALSE);
 	}
 	else
 	{
@@ -44,7 +44,7 @@ void GLES3_PipelineState::ApplyState(GLboolean depth_write) CONST
 	}
 
 	// Stencil
-	if (ds.stencil_enable)
+	if (ds.stencil_test_enable)
 	{
 		glEnable(GL_STENCIL_TEST);
 		// Phase 2: full stencil state (op/func/mask per face)
@@ -65,14 +65,15 @@ void GLES3_PipelineState::ApplyState(GLboolean depth_write) CONST
 		glEnable(GL_CULL_FACE);
 		glCullFace(TranslateCullMode(cull));
 	}
-	glPolygonOffset(rs.slope_scaled_depth_bias, rs.depth_bias);
+	glPolygonOffset(rs.depth_bias_slope_scaled, rs.depth_bias);
 
 	// Blend
-	if (bs.blend_enable[0])
+	if (!bs.render_targets.empty() && bs.render_targets[0].blend_enable)
 	{
 		glEnable(GL_BLEND);
-		glBlendFunc(TranslateBlendFactor(bs.src_blend), TranslateBlendFactor(bs.dst_blend));
-		glBlendEquation(TranslateBlendEquation(bs.blend_op));
+		glBlendFunc(TranslateBlendFactor(bs.render_targets[0].src_color),
+		            TranslateBlendFactor(bs.render_targets[0].dst_color));
+		glBlendEquation(TranslateBlendEquation(bs.render_targets[0].op_color));
 	}
 	else
 	{

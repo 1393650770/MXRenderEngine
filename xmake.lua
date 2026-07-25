@@ -5,8 +5,8 @@ if is_plat("android") then
     add_requires("glm","tinyobjloader","nlohmann_json","gli","optick","rttr")
     add_syslinks("vulkan", "android") -- libvulkan.so + libandroid.so on device
 elseif is_plat("wasm") then
-    -- WebGPU/Emscripten: only header-only or wasm-compatible packages
-    add_requires("glm","nlohmann_json","rttr")
+    -- GLES3 Phase 0: header-only libs only (flatbuffers/rttr require cmake emscripten fixes)
+    add_requires("glm","nlohmann_json")
 else
     add_requires("vulkansdk", "glm","tinyobjloader","nlohmann_json","gli","optick","rttr")
 end
@@ -20,7 +20,9 @@ elseif is_plat("wasm") then
 else
     add_requires("imgui v1.89.9-docking", {configs = { glfw_vulkan = true, debug = true, shared = true }})
 end
-add_requires("flatbuffers v1.12.0")
+if not is_plat("wasm") then
+    add_requires("flatbuffers v1.12.0", { system = false, configs = { vs_runtime = "MT" } })
+end
 if not is_plat("android","wasm") then
     add_requires("boost",{ version = "1.84.0",configs = {shared = true,debug=true,cmake=false}})
 end
@@ -76,7 +78,7 @@ function PlatformSettings()
         add_cxflags("-Wno-c++11-narrowing")
         add_ldflags("-Wl,--unresolved-symbols=ignore-in-shared-libs", {force = true})
     elseif is_plat("wasm") then
-        add_defines("PLATFORM_GLES3")
+        add_defines("PLATFORM_GLES3", "PLATFORM_EMSCRIPTEN")
         add_cxflags("-Wno-c++11-narrowing")
         add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1", {force = true})
     end
@@ -102,6 +104,26 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Platform/Desktop/**.cpp")
         remove_files("src/Runtime/Tool/MeshLoader.cpp")
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
+        remove_files("src/Runtime/Core/ReflectionRegister.cpp")  -- depends on rttr
+        remove_files("src/Runtime/RHI/DeviceProfile.cpp")  -- depends on vulkan
+        remove_files("src/Runtime/Asset/FileSystem/Win/WinFileSystem.cpp")  -- Win32 only
+        remove_files("src/Runtime/Render/Core/RenderGraphSerializer.cpp")  -- depends on gli (Editor path)
+        remove_files("src/Runtime/Render/Core/RenderGraphValidator.cpp")  -- Editor path
+        remove_files("src/Runtime/Render/Core/PassRegistry.cpp")  -- depends on Editor/serializer
+        remove_files("src/Runtime/Render/Core/VirtualTexture/**.cpp")  -- depends on gli
+        remove_files("src/Runtime/Tool/BufferUtils.cpp")  -- depends on vk
+        remove_files("src/Runtime/Tool/ToolUtils.cpp")  -- depends on gli
+        remove_files("src/Runtime/Tool/TextureLoader.cpp")  -- depends on gli
+        remove_files("src/Runtime/Asset/TextureAsset.cpp")  -- depends on gli/TextureLoader
+        remove_files("src/ThirdParty/emsdk/**")  -- emsdk is a build tool, not library source
+        remove_files("src/ThirdParty/spv_reflect/**")  -- SPIR-V only, not needed for GLES3
+        remove_files("src/Runtime/UI/Widget/**")  -- depends on rttr
+        remove_files("src/Runtime/UI/UIBase.cpp")  -- depends on Widget/rttr
+        remove_files("src/Runtime/UI/UIManager.cpp")  -- depends on Widget/rttr
+        remove_files("src/Runtime/UI/UIRenderPass.cpp")  -- not needed for GLES3 HelloTriangle
+        remove_files("src/ThirdParty/RmlUi/Source/Core/FontEngineDefault/**")  -- needs freetype
+        remove_files("src/ThirdParty/TaskScheduler/Scheduler/Include/Platform/Posix/**.cpp")  -- no pthread_attr_setaffinity_np on wasm
+        remove_files("src/ThirdParty/TaskScheduler/Scheduler/Source/**.cpp")  -- TaskScheduler unsupported on wasm
     else
         remove_files("src/Runtime/Platform/Android/**.cpp")
         remove_files("src/Runtime/Platform/WGPU/**.cpp")
@@ -115,11 +137,13 @@ function CommonLibrarySetting()
     end
     add_headerfiles("src/ThirdParty/**.h")
     add_files("src/ThirdParty/stb_image/**.cpp")
-    add_files("src/ThirdParty/spv_reflect/**.cpp")
+    if not is_plat("wasm") then
+        add_files("src/ThirdParty/spv_reflect/**.cpp")
+    end
     add_files("src/ThirdParty/**.c")
     -- RmlUI library (retained-mode game UI)
     add_includedirs("src/ThirdParty/RmlUi/Include", {public = true})
-    add_files("src/ThirdParty/RmlUi/Source/Core/**.cpp")
+    add_files("src/ThirdParty/RmlUi/Source/Core/**.cpp|**/FontEngineDefault/**")
     add_files("src/ThirdParty/RmlUi/Source/Core/Elements/**.cpp")
     add_files("src/ThirdParty/RmlUi/Source/Core/Layout/**.cpp")
     add_files("src/ThirdParty/RmlUi/Source/Debugger/**.cpp")
@@ -144,7 +168,8 @@ function CommonLibrarySetting()
         add_packages("vulkansdk")
     end
     if is_plat("wasm") then
-        add_packages("glm","nlohmann_json","imgui","flatbuffers","rttr")
+        -- Phase 0: header-only libs only (imgui/flatbuffers/rttr require cmake emscripten fixes)
+        add_packages("glm","nlohmann_json")
     else
         add_packages("glm","tinyobjloader","imgui","nlohmann_json","gli","optick","flatbuffers","rttr")
     end
@@ -311,7 +336,9 @@ function CommonProjectSetting()
     add_defines("RMLUI_STATIC_LIB")
     PlatformSettings()
     add_deps("Runtime")
-    add_files("src/_Generated/**.cpp", {public = true})
+    if not is_plat("wasm") then
+        add_files("src/_Generated/**.cpp", {public = true})
+    end
     add_includedirs("src/_Generated", {public = true})
     add_includedirs("src/Runtime", {public = true})
     add_includedirs("src/ThirdParty", {public = true})
@@ -319,7 +346,8 @@ function CommonProjectSetting()
         add_packages("vulkansdk")
     end
     if is_plat("wasm") then
-        add_packages("glm","imgui","flatbuffers","rttr","nlohmann_json")
+        -- Phase 0: header-only libs only
+        add_packages("glm","nlohmann_json")
     else
         add_packages("glm","tinyobjloader","imgui","flatbuffers","rttr","nlohmann_json")
     end
@@ -356,8 +384,10 @@ target("Runtime")
     if not is_plat("wasm") then
         add_packages("glslang")
     end
-    add_rules("utils.glsl2spv", {outputdir = "$(projectdir)/src/Runtime/GenCode/Shader",bin2c = true})
-    add_files("resource/Shader/**|**.spv|**.bat|**.exe|**.h|**.glsl", {build = false})
+    if not is_plat("wasm") then
+        add_rules("utils.glsl2spv", {outputdir = "$(projectdir)/src/Runtime/GenCode/Shader",bin2c = true})
+        add_files("resource/Shader/**|**.spv|**.bat|**.exe|**.h|**.glsl|**.wgsl", {build = false})
+    end
     set_group("Runtime")
     CommonLibrarySetting()
     add_deps("CompileResource")
@@ -527,6 +557,26 @@ target("MiniGame-HelloTriangle")
     if is_plat("wasm") then
         CommonProjectSetting()
         add_files("src/Sample/MiniGame-HelloTriangle/HelloTriangle.cpp")
+    else
+        set_kind("binary")
+        add_deps("Runtime")
+    end
+    set_group("Sample")
+
+target("MiniGame-Texture")
+    if is_plat("wasm") then
+        CommonProjectSetting()
+        add_files("src/Sample/MiniGame-Texture/Texture.cpp")
+    else
+        set_kind("binary")
+        add_deps("Runtime")
+    end
+    set_group("Sample")
+
+target("MiniGame-Mesh")
+    if is_plat("wasm") then
+        CommonProjectSetting()
+        add_files("src/Sample/MiniGame-Mesh/Mesh.cpp")
     else
         set_kind("binary")
         add_deps("Runtime")

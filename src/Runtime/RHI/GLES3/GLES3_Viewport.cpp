@@ -19,7 +19,7 @@ GLES3_Viewport::GLES3_Viewport(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx, UInt32 width
 	tex_desc.height = height;
 	tex_desc.format = ENUM_TEXTURE_FORMAT::BGRA8;
 	tex_desc.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
-	tex_desc.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_RENDER_TARGET;
+	tex_desc.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT;
 	tex_desc.resource_state = ENUM_RESOURCE_STATE::RenderTarget;
 
 	m_backbuffer_tex = new GLES3_Texture(tex_desc);
@@ -39,12 +39,7 @@ GLES3_Viewport::~GLES3_Viewport()
 
 Texture* GLES3_Viewport::GetCurrentBackBufferRTV()
 {
-	// Update backbuffer texture desc with current size
-	if (m_backbuffer_tex)
-	{
-		m_backbuffer_tex->GetDesc().width = m_width;
-		m_backbuffer_tex->GetDesc().height = m_height;
-	}
+	// Default framebuffer: width/height metadata are informational only
 	return m_backbuffer_tex;
 }
 

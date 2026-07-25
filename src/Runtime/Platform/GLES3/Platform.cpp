@@ -7,7 +7,7 @@ MXRender::RHI::RenderRHI* PlatformCreateDynamicRHI()
 {
 	MXRender::RHI::GLES3::GLES3_RenderRHI* pRHI = new MXRender::RHI::GLES3::GLES3_RenderRHI();
 	MXRender::RHI::RenderFactory factory;
-	factory.threading_mode = MXRender::EThreadingMode::Single;
+	factory.threading_mode = EThreadingMode::Single;
 	pRHI->Init(&factory);
 	return pRHI;
 }

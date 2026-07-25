@@ -1,8 +1,10 @@
 #include "RenderRHI.h"
 #include "Platform/Platform.h"
+#if !PLATFORM_GLES3 && !PLATFORM_WGPU
 #include "Vulkan/VK_RenderPass.h"
 #include "Vulkan/VK_RenderRHI.h"
 #include "Vulkan/VK_BindlessManager.h"
+#endif
 #include "ResourceManager.h"
 #include "RenderTexture.h"
 

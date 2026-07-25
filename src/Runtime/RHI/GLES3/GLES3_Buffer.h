@@ -23,6 +23,9 @@ public:
 	void METHOD(SetGLBuffer)(GLuint buffer, void* mapped_ptr = nullptr);
 	GLuint METHOD(GetGLBuffer)() CONST { return m_gl_buffer; }
 	GLenum METHOD(GetGLTarget)() CONST { return m_gl_target; }
+
+	// Direct data upload via glBufferSubData (no map/unmap needed)
+	void METHOD(SetData)(const void* data, UInt32 size, UInt32 offset = 0);
 protected:
 private:
 #pragma endregion

@@ -14,6 +14,7 @@
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/Desktop/DesktopWindow.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/FileDialog.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/FileSystem.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/GLES3/EmscriptenGLWindow.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/Platform.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/PlatformDebug.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/PlatformWindow.h"

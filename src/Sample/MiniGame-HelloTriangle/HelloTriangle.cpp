@@ -117,12 +117,12 @@ void MiniGameHelloTriangle::OnInitScene()
 			pso_desc.depth_stencil_view = GetDepthStencil();
 			pso_desc.raster_state.sample_count = 1;
 			pso_desc.blend_state.render_targets.resize(1);
-			pso_desc.depth_stencil_state.depth_enable = false;
+			pso_desc.depth_stencil_state.depth_test_enable = false;
 
 			data.pso = g_render_rhi->CreateRenderPipelineState(pso_desc);
 			if (data.pso) data.pso->CreateShaderResourceBinding(data.srb);
 		},
-		[=](CONST TriPassData& data, CommandList* in_cmd_list)
+		[this](CONST TriPassData& data, CommandList* in_cmd_list)
 		{
 			BindBackBufferTarget(in_cmd_list);
 			in_cmd_list->SetGraphicsPipeline(data.pso);

@@ -195,15 +195,67 @@ Shader* GLES3_RenderRHI::CreateShader(CONST ShaderDesc& desc, CONST ShaderDataPa
 
 Buffer* GLES3_RenderRHI::CreateBuffer(CONST BufferDesc& buffer_desc)
 {
-	// Minimal: HelloTriangle doesn't use buffers (hardcoded triangle in shader).
 	auto* buf = new GLES3_Buffer(buffer_desc);
+
+	GLuint gl_buf = 0;
+	glGenBuffers(1, &gl_buf);
+	CHECK_WITH_LOG(gl_buf == 0, "GLES3: glGenBuffers failed");
+
+	GLenum target = buf->GetGLTarget();
+	GLenum usage = TranslateBufferType_ToUsage(buffer_desc.type);
+
+	glBindBuffer(target, gl_buf);
+	glBufferData(target, (GLsizeiptr)buffer_desc.size, nullptr, usage);
+	glBindBuffer(target, 0);
+
+	buf->SetGLBuffer(gl_buf);
 	return buf;
 }
 
 Texture* GLES3_RenderRHI::CreateTexture(CONST TextureDesc& texture_desc)
 {
-	// Minimal: HelloTriangle uses default framebuffer only.
 	auto* tex = new GLES3_Texture(texture_desc);
+
+	// Phase 0: default framebuffer doesn't need a GL texture
+	if (texture_desc.usage == ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT &&
+	    texture_desc.width == 1280) // heuristic: swapchain backbuffer
+	{
+		return tex;
+	}
+
+	// Create GL texture
+	GLuint gl_tex = 0;
+	glGenTextures(1, &gl_tex);
+	CHECK_WITH_LOG(gl_tex == 0, "GLES3: glGenTextures failed");
+
+	GLenum internal_fmt = TranslateTextureFormat_Internal(texture_desc.format);
+	GLenum pixel_fmt = TranslateTextureFormat_Pixel(texture_desc.format);
+	GLenum pixel_type = TranslateTextureFormat_Type(texture_desc.format);
+
+	GLenum tex_target = GL_TEXTURE_2D;
+	if (texture_desc.type == ENUM_TEXTURE_TYPE::ENUM_TYPE_3D)
+		tex_target = GL_TEXTURE_3D;
+	else if (texture_desc.type == ENUM_TEXTURE_TYPE::ENUM_TYPE_CUBE_MAP)
+		tex_target = GL_TEXTURE_CUBE_MAP;
+
+	glBindTexture(tex_target, gl_tex);
+
+	if (tex_target == GL_TEXTURE_2D)
+	{
+		glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal_fmt,
+			(GLsizei)texture_desc.width, (GLsizei)texture_desc.height,
+			0, pixel_fmt, pixel_type, nullptr);
+	}
+
+	// Default sampling params
+	glTexParameteri(tex_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(tex_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(tex_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(tex_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glBindTexture(tex_target, 0);
+
+	tex->SetGLTexture(gl_tex);
 	return tex;
 }
 
@@ -226,15 +278,14 @@ RenderPipelineState* GLES3_RenderRHI::CreateRenderPipelineState(CONST RenderGrap
 	auto* pso = new GLES3_PipelineState(desc);
 	pso->SetGLProgram(program);
 
-	// Create VAO if there's a vertex input layout (Phase 1+).
-	// Phase 0 (HelloTriangle): gl_VertexIndex in shader, no VAO needed.
+	// GLES 3.0: VAO creation is deferred to draw time (glVertexAttribPointer
+	// requires a bound VBO). The vertex layout is stored in the PSO and
+	// applied in GLES3_CommandBuffer::Draw/DrawIndexed.
 	GLuint vao = 0;
-	if (!desc.vertex_input_layout.bindings.empty())
+	if (!desc.vertex_input_layout.empty())
 	{
 		glGenVertexArrays(1, &vao);
-		glBindVertexArray(vao);
-		// Phase 2+: set up vertex attributes from vertex_input_layout
-		glBindVertexArray(0);
+		// VAO is created but attributes are set at draw time
 	}
 	pso->SetVAO(vao);
 

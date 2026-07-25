@@ -26,6 +26,11 @@ public:
 	void METHOD(SetVAO)(GLuint vao) { m_vao = vao; }
 	GLuint METHOD(GetVAO)() CONST { return m_vao; }
 
+	// Public accessors for protected base-class fields
+	ENUM_PRIMITIVE_TYPE METHOD(GetPrimitiveTopology)() CONST { return desc.primitive_topology; }
+	CONST RenderGraphiPipelineStateDesc& METHOD(GetPSODesc)() CONST { return desc; }
+	Bool METHOD(HasVertexLayout)() CONST { return !desc.vertex_input_layout.empty(); }
+
 	// State fields from the PSO desc (applied at SetGraphicsPipeline time)
 	void METHOD(ApplyState)(GLboolean depth_write = GL_FALSE) CONST;
 protected:

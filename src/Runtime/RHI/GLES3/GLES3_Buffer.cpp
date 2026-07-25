@@ -28,13 +28,13 @@ void* GLES3_Buffer::Map(CONST ENUM_MAP_TYPE& map_type, CONST ENUM_MAP_FLAG& map_
 	if (!m_gl_buffer) return nullptr;
 
 	GLbitfield access = GL_MAP_WRITE_BIT;
-	if (EnumHasFlags(map_flag, ENUM_MAP_FLAG::Discard))
+	if (EnumHasAnyFlags(map_flag, ENUM_MAP_FLAG::Discard))
 		access |= GL_MAP_INVALIDATE_BUFFER_BIT;
-	if (EnumHasFlags(map_flag, ENUM_MAP_FLAG::DoNotWait))
+	if (EnumHasAnyFlags(map_flag, ENUM_MAP_FLAG::DoNotWait))
 		access |= GL_MAP_UNSYNCHRONIZED_BIT;
 
 	glBindBuffer(m_gl_target, m_gl_buffer);
-	m_mapped_ptr = glMapBufferRange(m_gl_target, 0, m_desc.size, access);
+	m_mapped_ptr = glMapBufferRange(m_gl_target, 0, buffer_desc.size, access);
 	return m_mapped_ptr;
 }
 
@@ -46,6 +46,14 @@ void GLES3_Buffer::Unmap()
 		glUnmapBuffer(m_gl_target);
 		m_mapped_ptr = nullptr;
 	}
+}
+
+void GLES3_Buffer::SetData(const void* data, UInt32 size, UInt32 offset)
+{
+	if (!m_gl_buffer || !data) return;
+	glBindBuffer(m_gl_target, m_gl_buffer);
+	glBufferSubData(m_gl_target, (GLintptr)offset, (GLsizeiptr)size, data);
+	glBindBuffer(m_gl_target, 0);
 }
 
 void GLES3_Buffer::SetGLBuffer(GLuint buffer, void* mapped_ptr)

@@ -68,7 +68,12 @@ protected:
 	UInt32 m_fbo_width = 0;
 	UInt32 m_fbo_height = 0;
 
+	// Vertex buffer state (bound VBOs by binding slot + stored stride)
+	struct BoundVB { GLuint buf = 0; UInt32 stride = 0; UInt32 offset = 0; };
+	BoundVB m_bound_vbs[4];  // up to 4 vertex buffer bindings
+
 	// Index buffer state (for DrawIndexed)
+	GLuint m_current_ibo = 0;
 	GLenum m_current_index_type = GL_UNSIGNED_SHORT;
 	UInt32 m_current_index_offset = 0;
 private:

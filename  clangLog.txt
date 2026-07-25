@@ -159,6 +159,7 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileDialog.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileSystem.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\GLES3\EmscriptenGLWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Platform.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformDebug.h \
   D:\App\VisualStudio\VC\Tools\MSVC\14.51.36231\include\cstdarg \

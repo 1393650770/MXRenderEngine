@@ -5,7 +5,9 @@
 #include "Core/ConstGlobals.h"
 #include "Platform/PlatformWindow.h"
 #include "Render/Core/RenderFrameSync.h"
+#if !PLATFORM_GLES3 && !PLATFORM_WGPU
 #include <MTScheduler.h>
+#endif
 
 #include <array>
 #include <functional>
@@ -46,7 +48,9 @@ protected:
 	String title = "MXRender";
 	Bool is_full_screen = false;
 	MXRender::RHI::Viewport* viewport = nullptr;
+#if !PLATFORM_GLES3 && !PLATFORM_WGPU
 	MT::TaskScheduler scheduler;
+#endif
 	MXRender::Render::FrameSynchronizer frame_sync;
 private:
 #pragma endregion

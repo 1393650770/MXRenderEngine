@@ -4,7 +4,9 @@
 #include "Core/ConstDefine.h"
 #include "RHI/RenderEnum.h"
 #include "Render/Core/RenderGraphDefinition.h"
+#if !PLATFORM_GLES3 && !PLATFORM_WGPU
 #include "gli/format.hpp"
+#endif
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Tool)
@@ -23,7 +25,9 @@ ENUM_BUFFER_TYPE StringToEnum_BufferType(CONST String& str);
 
 MYRENDERER_BEGIN_CLASS( ToolUtils )
 public:
+#if !PLATFORM_GLES3 && !PLATFORM_WGPU
 	static ENUM_TEXTURE_FORMAT METHOD(TranslateGliFormatToEngineFormat)(CONST gli::format& in_format);
+#endif
 
 MYRENDERER_END_CLASS
 MYRENDERER_END_NAMESPACE
