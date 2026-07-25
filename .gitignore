@@ -73,6 +73,9 @@ pack/Douyin/dist/
 pack/Android/debug.keystore
 pack/Android/mxrender_hello.apk*
 pack/Android/tmp_apk/
+pack/Android/debug.keystore
+pack/Android/mxrender_hello.apk*
+pack/Android/tmp_apk/
 src/ThirdParty/emsdk/upstream/emscripten/em++
 src/ThirdParty/emsdk/upstream/emscripten/emar
 src/ThirdParty/emsdk/upstream/emscripten/emcc
@@ -126,3 +129,8 @@ src/ThirdParty/emsdk/upstream/emscripten/tools/ports/__pycache__/vorbis.cpython-
 src/ThirdParty/emsdk/upstream/emscripten/tools/ports/__pycache__/zlib.cpython-314.pyc
 src/ThirdParty/emsdk/upstream/emscripten/tools/ports/contrib/__pycache__/glfw3.cpython-314.pyc
 src/ThirdParty/emsdk/upstream/emscripten/tools/ports/contrib/__pycache__/lua.cpython-314.pyc
+pack/Douyin/game.js
+pack/test_wasm.html
+pack/WeChat/game.js
+pack/Douyin/game.json
+

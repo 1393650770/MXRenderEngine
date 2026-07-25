@@ -312,6 +312,38 @@ pack\Douyin\build_pack.bat MiniGame-Mesh debug
 # → Import into Douyin Developer Tools → Compile → Preview
 ```
 
+**How it works** — the packaging layer mirrors the C++ engine's architecture:
+
+```
+pack/
+├── shared/
+│   └── polyfills.js          # Shared Emscripten adapter (~180 lines)
+│                              #   TypedArray / WebAssembly / document / navigator /
+│                              #   performance / fetch / URL / Image / Audio / etc.
+│                              #   Single public API: __setDocumentCanvas(canvas)
+├── Douyin/
+│   ├── game.js               # Douyin entry (platform-specific, ~80 lines)
+│   │                          #   tt.createCanvas() → polyfills → Module config
+│   │                          #   → wasmBinary (bypasses fetch) → input bridge
+│   ├── game.json             # Douyin mini-game config
+│   ├── project.config.json   # IDE project config (compileType: "game")
+│   └── build_pack.bat        # Build + copy → dist/
+└── WeChat/
+    ├── game.js               # WeChat entry (same structure, wx.* vs tt.*)
+    ├── game.json             # WeChat mini-game config
+    ├── project.config.json   # IDE project config (libVersion, appid)
+    └── build_pack.bat        # Build + copy → dist/
+```
+
+Each platform's `game.js` follows a 5-step sequence:
+1. Save platform API (`tt` / `wx`) before Emscripten shadows it
+2. Create canvas via platform API (`tt.createCanvas()` / `wx.createCanvas()`)
+3. Load shared `polyfills.js` + inject canvas into document mock
+4. Configure `Module` (canvas, `wasmBinary` for fetch-free loading, `noImageDecoding`/`noAudioDecoding` to skip browser plugins)
+5. `require('./mxrender.js')` — Emscripten glue loads, instantiates WASM, starts main loop
+
+Touch input is bridged in `Module.postRun`: `tt/wx.onTouch*` → `Module._mx_feed_mouse_*` (C++ `EMSCRIPTEN_KEEPALIVE` exports). The C++ side (`EmscriptenGLWindow`) requires zero modifications.
+
 **MiniGame Samples**:
 | Target | Feature |
 |--------|---------|
@@ -711,6 +743,38 @@ pack\Douyin\build_pack.bat MiniGame-Mesh debug
 # 产出: pack\Douyin\dist\MiniGame-Mesh_tt\
 # → 抖音开发者工具 → 导入项目 → 编译 → 预览
 ```
+
+**架构说明** — JS 打包层镜像了 C++ 引擎的分层设计：
+
+```
+pack/
+├── shared/
+│   └── polyfills.js          # 共享 Emscripten 适配层 (~180行)
+│                              #   TypedArray / WebAssembly / document / navigator /
+│                              #   performance / fetch / URL / Image / Audio 等 18 类 mock
+│                              #   对外唯一接口: __setDocumentCanvas(canvas)
+├── Douyin/
+│   ├── game.js               # 抖音入口 (平台特定, ~80行)
+│   │                          #   tt.createCanvas() → polyfills → Module 配置
+│   │                          #   → wasmBinary (绕过fetch) → 输入桥接
+│   ├── game.json             # 抖音小游戏配置
+│   ├── project.config.json   # IDE 工程配置 (compileType: "game")
+│   └── build_pack.bat        # 编译 + 打包 → dist/
+└── WeChat/
+    ├── game.js               # 微信入口 (结构相同, wx.* 替代 tt.*)
+    ├── game.json             # 微信小游戏配置
+    ├── project.config.json   # IDE 工程配置 (libVersion, appid)
+    └── build_pack.bat        # 编译 + 打包 → dist/
+```
+
+每个平台的 `game.js` 遵循 5 步流程：
+1. 保存平台 API (`tt` / `wx`)，防止被 Emscripten 覆盖
+2. 通过平台 API 创建 Canvas (`tt.createCanvas()` / `wx.createCanvas()`)
+3. 加载共享 `polyfills.js` + 注入 canvas 到 document mock
+4. 配置 `Module` (canvas、`wasmBinary` 绕过 fetch 加载、`noImageDecoding`/`noAudioDecoding` 跳过浏览器插件)
+5. `require('./mxrender.js')` — Emscripten 胶水代码加载、实例化 WASM、启动主循环
+
+触摸输入在 `Module.postRun` 中桥接：`tt/wx.onTouch*` → `Module._mx_feed_mouse_*` (C++ `EMSCRIPTEN_KEEPALIVE` 导出函数)。C++ 端 (`EmscriptenGLWindow`) 无需任何修改。
 
 **小游戏 Sample**:
 | Target | 功能 |

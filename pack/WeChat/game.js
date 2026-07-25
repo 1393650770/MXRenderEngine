@@ -1,22 +1,86 @@
-// WeChat Mini-Game Entry Point for MyRenderer
-// Loads the Emscripten-generated JS glue and initializes the game.
-// Place this in the mini-game project root alongside the .wasm/.js files.
+// MyRenderer — WeChat (WeiXin) Mini-Game Entry
+// ===============================================
+// Same 5-step structure as Douyin/game.js.
+// Only difference: wx.* instead of tt.*.
+// See pack/Douyin/game.js for detailed inline comments.
 
-// WeChat mini-game environment provides a global canvas.
-// Our Emscripten build uses "#canvas" selector — we need to create
-// the canvas element for WeChat's runtime.
+console.log('[game.js] WeChat MiniGame starting...');
 
-// Store the real wx API on the global scope (Emscripten may override it)
+// ---- Step 1: Save platform API ----
 var realWx = wx;
 
-// Create canvas for WebGL rendering
-var canvas = wx.createCanvas();
+// ---- Step 2: Create canvas ----
+var canvas = realWx.createCanvas();
 canvas.id = 'canvas';
+console.log('[game.js] Canvas created: ' + canvas.width + 'x' + canvas.height);
 
-// WeChat requires the canvas to be in the document-like environment
-// (wx.createCanvas() already provides the correct canvas for WebGL)
+// ---- Step 3: Load shared polyfills + inject canvas ----
+// Set canvas BEFORE polyfills — polyfills reads __mx_canvas internally
+globalThis.__mx_canvas = canvas;
+require('./polyfills.js');
 
-// Import the Emscripten JS glue (this initializes the wasm module)
-// The glue script name should match the build output.
-// E.g. if building MiniGame-Mesh, rename to "game.wasm.js"
+// ---- Step 3b: Fix fetch for local WASM loading ----
+globalThis.fetch = function(url) {
+  return new Promise(function(resolve, reject) {
+    realWx.getFileSystemManager().readFile({
+      filePath: typeof url === 'string' ? url.replace(/^\.?\//, '') : 'mxrender.wasm',
+      success: function(res) {
+        resolve({
+          ok: true, status: 200,
+          arrayBuffer: function() { return Promise.resolve(res.data); },
+        });
+      },
+      fail: function(err) { reject(new Error('fetch failed: ' + JSON.stringify(err))); }
+    });
+  });
+};
+console.log('[game.js] fetch polyfill ready');
+
+// ---- Step 3c: Force navigator.userAgent override ----
+try {
+  Object.defineProperty(globalThis.navigator, 'userAgent', {
+    value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/605.1.15',
+    writable: true, configurable: true
+  });
+  console.log('[game.js] userAgent overridden');
+} catch(e) {
+  console.log('[game.js] userAgent override failed:', e.message);
+}
+
+// ---- Step 4: Configure Emscripten Module ----
+var Module = {
+  canvas: canvas,
+  wasmBinaryFile: 'mxrender.wasm',
+  noImageDecoding: true,
+  noAudioDecoding: true,
+  print: function(t)    { console.log('[wasm]', t); },
+  printErr: function(t) { console.error('[wasm]', t); },
+  onAbort: function(m)  { console.error('[wasm] ABORT:', m); },
+
+  postRun: [function() {
+    console.log('[game.js] WASM ready, registering input bridge');
+    realWx.onTouchStart(function(e) {
+      if (!e.touches || !e.touches.length) return;
+      var t = e.touches[0];
+      Module._mx_feed_mouse_move(t.clientX, t.clientY);
+      Module._mx_feed_mouse_down(0);
+    });
+    realWx.onTouchMove(function(e) {
+      if (!e.touches || !e.touches.length) return;
+      var t = e.touches[0];
+      Module._mx_feed_mouse_move(t.clientX, t.clientY);
+    });
+    realWx.onTouchEnd(function(e) {
+      Module._mx_feed_mouse_up(0);
+    });
+    realWx.onTouchCancel(function(e) {
+      Module._mx_feed_mouse_up(0);
+    });
+    console.log('[game.js] Input bridge ready');
+  }],
+};
+
+// ---- Step 5: Load Emscripten glue ----
+console.log('[game.js] Loading mxrender.js...');
 require('./mxrender.js');
+console.log('[game.js] Done.');

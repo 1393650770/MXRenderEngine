@@ -47,9 +47,14 @@ echo [3/3] Copying game files...
 copy "%SCRIPT_DIR%game.js"              "%PACK_DIR%\game.js"            > nul
 copy "%SCRIPT_DIR%game.json"            "%PACK_DIR%\game.json"          > nul
 copy "%SCRIPT_DIR%project.config.json"  "%PACK_DIR%\project.config.json" > nul
+copy "%PROJ_ROOT%\pack\shared\polyfills.js" "%PACK_DIR%\polyfills.js"   > nul
 
 if exist "%OUT_DIR%\%SAMPLE%.js"   copy "%OUT_DIR%\%SAMPLE%.js"   "%PACK_DIR%\mxrender.js"   > nul
 if exist "%OUT_DIR%\%SAMPLE%.wasm" copy "%OUT_DIR%\%SAMPLE%.wasm" "%PACK_DIR%\mxrender.wasm" > nul
+
+REM Strip require('node:*') — mini-game bundler can't resolve Node.js builtins
+set "EMSDK_NODE=%PROJ_ROOT%\src\ThirdParty\emsdk\node\22.16.0_64bit\bin\node.exe"
+if exist "%EMSDK_NODE%" "%EMSDK_NODE%" "%PROJ_ROOT%\pack\shared\strip_node_requires.js" "%PACK_DIR%\mxrender.js"
 
 echo   Files copied.
 
