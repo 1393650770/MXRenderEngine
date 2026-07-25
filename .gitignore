@@ -44,5 +44,27 @@ vsxmake2019
 vsxmake2019/
 vsxmake*
 
+# tinygltf examples/tests/models (keep only tiny_gltf.h + json.hpp)
+src/ThirdParty/tinygltf/examples/
+src/ThirdParty/tinygltf/tests/
+src/ThirdParty/tinygltf/models/
+src/ThirdParty/tinygltf/tools/
+src/ThirdParty/tinygltf/benchmark/
+src/ThirdParty/tinygltf/experimental/
+src/ThirdParty/tinygltf/wasm/
+src/ThirdParty/tinygltf/deps/
+src/ThirdParty/tinygltf/cmake/
+src/ThirdParty/tinygltf/images/
+src/ThirdParty/tinygltf/*.md
+src/ThirdParty/tinygltf/*.txt
+src/ThirdParty/tinygltf/*.bat
+src/ThirdParty/tinygltf/*.py
 
+# MiniGame pack outputs (generated)
+pack/WeChat/dist/
+pack/Douyin/dist/
 
+# Android packaging outputs
+pack/Android/debug.keystore
+pack/Android/mxrender_hello.apk*
+pack/Android/tmp_apk/
