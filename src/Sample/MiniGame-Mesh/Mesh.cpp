@@ -214,7 +214,7 @@ void MiniGameMesh::OnInitScene()
 
 void MiniGameMesh::OnUpdate(Float32 dt)
 {
-	m_camera.Update(dt, 1280, 960, m_scene_view);
+	m_camera.Update(dt, GetViewportWidth(), GetViewportHeight(), m_scene_view);
 }
 
 void MiniGameMesh::OnShutdownScene()

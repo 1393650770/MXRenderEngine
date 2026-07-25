@@ -15,7 +15,12 @@ var realTT = tt;
 // ---- Step 2: Create canvas ----
 var canvas = realTT.createCanvas();
 canvas.id = 'canvas';
-console.log('[game.js] Canvas created: ' + canvas.width + 'x' + canvas.height);
+// Lock canvas size — C++ EmscriptenGLWindow constructor calls
+// emscripten_set_canvas_element_size(1280, 960) which would overwrite
+// the phone's native resolution. Object.defineProperty prevents this.
+Object.defineProperty(canvas, 'width',  { value: canvas.width,  writable: false, configurable: true });
+Object.defineProperty(canvas, 'height', { value: canvas.height, writable: false, configurable: true });
+console.log('[game.js] Canvas created: ' + canvas.width + 'x' + canvas.height + ' (locked)');
 
 // ---- Step 3: Load shared polyfills + inject canvas ----
 // Set canvas BEFORE polyfills — polyfills reads __mx_canvas internally
@@ -84,45 +89,41 @@ var Module = {
   printErr: function(t) { console.error('[wasm]', t); },
   onAbort: function(m)  { console.error('[wasm] ABORT:', m); },
 
-  // Patch canvas resize to use phone's real dimensions
-  // (engine hardcodes 1280x960, but phone canvas is typically different)
-  preRun: [function() {
-    if (typeof _emscripten_set_canvas_element_size === 'function') {
-      var _orig = _emscripten_set_canvas_element_size;
-      _emscripten_set_canvas_element_size = function(sel, w, h) {
-        console.log('[game.js] canvas resize requested: ' + w + 'x' + h +
-                    ', actual canvas: ' + canvas.width + 'x' + canvas.height);
-        // Use the actual canvas dimensions from tt.createCanvas()
-        _orig(sel, canvas.width || w, canvas.height || h);
-      };
-    }
-  }],
-
-  // Input bridge: register AFTER wasm is fully initialized
-  postRun: [function() {
-    console.log('[game.js] WASM ready, registering input bridge');
-    realTT.onTouchStart(function(e) {
-      if (!e.touches || !e.touches.length) return;
-      var t = e.touches[0];
-      Module._mx_feed_mouse_move(t.clientX, t.clientY);
-      Module._mx_feed_mouse_down(0);
-    });
-    realTT.onTouchMove(function(e) {
-      if (!e.touches || !e.touches.length) return;
-      var t = e.touches[0];
-      Module._mx_feed_mouse_move(t.clientX, t.clientY);
-    });
-    realTT.onTouchEnd(function(e) {
-      Module._mx_feed_mouse_up(0);
-    });
-    realTT.onTouchCancel(function(e) {
-      Module._mx_feed_mouse_up(0);
-    });
-    console.log('[game.js] Input bridge ready');
-  }],
 };
 
 // ---- Step 5: Load Emscripten glue ----
 console.log('[game.js] Loading mxrender.js...');
 require('./mxrender.js');
+
+// ---- Input bridge: touch → mouse emulation ----
+// Register early (WASM exports become real after async instantiation).
+// Each handler checks the function exists before calling (may be
+// a stub during the brief window between script load and WASM init).
+function registerTouchBridge() {
+  if (typeof Module._mx_feed_mouse_move !== 'function') {
+    // WASM not ready yet — retry on next frame
+    setTimeout(registerTouchBridge, 50);
+    return;
+  }
+  realTT.onTouchStart(function(e) {
+    if (!e.touches || !e.touches.length) return;
+    var t = e.touches[0];
+    Module._mx_feed_mouse_move(t.clientX, t.clientY);
+    Module._mx_feed_mouse_down(0);
+  });
+  realTT.onTouchMove(function(e) {
+    if (!e.touches || !e.touches.length) return;
+    var t = e.touches[0];
+    Module._mx_feed_mouse_move(t.clientX, t.clientY);
+  });
+  realTT.onTouchEnd(function(e) {
+    Module._mx_feed_mouse_up(0);
+  });
+  realTT.onTouchCancel(function(e) {
+    Module._mx_feed_mouse_up(0);
+  });
+  console.log('[game.js] Input bridge ready');
+}
+registerTouchBridge();
+
 console.log('[game.js] Done.');

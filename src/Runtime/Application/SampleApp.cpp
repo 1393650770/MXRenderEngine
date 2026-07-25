@@ -79,6 +79,16 @@ RHI::Texture* SampleApp::GetDepthStencil() CONST
 	return viewport->GetCurrentBackBufferDSV();
 }
 
+UInt32 SampleApp::GetViewportWidth() CONST
+{
+	return viewport ? viewport->GetViewportSizeWidth() : 1280;
+}
+
+UInt32 SampleApp::GetViewportHeight() CONST
+{
+	return viewport ? viewport->GetViewportSizeHeight() : 960;
+}
+
 void SampleApp::BindBackBufferTarget(RHI::CommandList* in_cmd) CONST
 {
 	Vector<RHI::Texture*> rtvs = { GetBackBuffer() };

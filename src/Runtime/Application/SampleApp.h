@@ -48,6 +48,8 @@ public:
 	Render::RenderGraphResource<RHI::TextureDesc, RHI::Texture>* METHOD(GetDepthStencilResource)() CONST { return depth_stencil_resource; }
 	void METHOD(BindBackBufferTarget)(RHI::CommandList* in_cmd) CONST;
 	void METHOD(SaveGraphDefinition)(CONST String& in_graph_name, CONST String& in_file_path);
+	UInt32 METHOD(GetViewportWidth)() CONST;
+	UInt32 METHOD(GetViewportHeight)() CONST;
 protected:
 
 private:

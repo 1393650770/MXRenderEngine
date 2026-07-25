@@ -70,10 +70,10 @@ function PlatformSettings()
         add_cxflags("-Wno-c++11-narrowing")
         if is_mode("release") then
             add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1",
-                "-sENVIRONMENT=web", "-sMIN_SAFARI_VERSION=0", "-sMIN_CHROME_VERSION=0", "-sMIN_FIREFOX_VERSION=0", "-sMIN_EDGE_VERSION=0", "-sMIN_IE_VERSION=0", "-Oz", "-flto", "-sASSERTIONS=0", {force = true})
+                "-sENVIRONMENT=web", "-sMIN_SAFARI_VERSION=0", "-sMIN_CHROME_VERSION=0", "-sMIN_FIREFOX_VERSION=0", "-Oz", "-flto", "-sASSERTIONS=0", {force = true})
         else
             add_ldflags("-sFULL_ES3=1", "-sMAX_WEBGL_VERSION=2", "-sALLOW_MEMORY_GROWTH=1",
-                "-sENVIRONMENT=web", "-sMIN_SAFARI_VERSION=0", "-sMIN_CHROME_VERSION=0", "-sMIN_FIREFOX_VERSION=0", "-sMIN_EDGE_VERSION=0", "-sMIN_IE_VERSION=0", {force = true})
+                "-sENVIRONMENT=web", "-sMIN_SAFARI_VERSION=0", "-sMIN_CHROME_VERSION=0", "-sMIN_FIREFOX_VERSION=0", {force = true})
         end
     end
 end

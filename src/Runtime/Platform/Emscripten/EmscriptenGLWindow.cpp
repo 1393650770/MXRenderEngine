@@ -12,9 +12,20 @@
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 
+// JS→C++ canvas size bridge: set by mx_set_canvas_size() from game.js preRun,
+// read by InitRHIAndViewport() to create the viewport at native device resolution.
+static Int g_mx_canvas_w = 0;
+static Int g_mx_canvas_h = 0;
+
 EmscriptenGLWindow::EmscriptenGLWindow(const String& title, UInt32 w, UInt32 h)
 	: m_width((Int)w), m_height((Int)h)
 {
+	// Do NOT overwrite canvas size here — mini-game runtimes (Douyin/WeChat)
+	// create the canvas at native device resolution via tt/wx.createCanvas().
+	// Attempting to detect the size via EM_ASM or emscripten_get_canvas_element_size
+	// fails at constructor time (WASM execution context may not see polyfilled DOM).
+	// Instead, InitRHIAndViewport() will read the actual framebuffer size
+	// and create the viewport with the correct dimensions.
 	emscripten_set_canvas_element_size(m_canvas_selector.c_str(), (int)w, (int)h);
 	std::cout << "[GLES3] EmscriptenGLWindow created: " << w << "x" << h << std::endl;
 }
@@ -177,6 +188,15 @@ void EmscriptenGLWindow::InitRHIAndViewport()
 {
 	if (m_init_done || !m_render) return;
 
+	// Use canvas size from JS if available (set via mx_set_canvas_size in
+	// game.js preRun). The constructor defaults to 1280x960, but the phone's
+	// native resolution (from tt/wx.createCanvas()) is different.
+	if (g_mx_canvas_w > 0 && g_mx_canvas_h > 0)
+	{
+		m_width  = g_mx_canvas_w;
+		m_height = g_mx_canvas_h;
+	}
+
 	// RHIInit was already called in Window::InitWindow.
 	// Create the viewport (which triggers emscripten_webgl_create_context
 	// inside GLES3_RenderRHI::CreateViewport).
@@ -261,8 +281,15 @@ UniquePtr<PlatformWindow> CreatePlatformWindow(const String& title, UInt32 w, UI
 	return std::make_unique<EmscriptenGLWindow>(title, w, h);
 }
 
-MYRENDERER_END_NAMESPACE
+extern "C" {
+	EMSCRIPTEN_KEEPALIVE void mx_set_canvas_size(int w, int h) {
+		g_mx_canvas_w = w;
+		g_mx_canvas_h = h;
+		std::cout << "[GLES3] JS canvas size: " << w << "x" << h << std::endl;
+	}
+}
 
+MYRENDERER_END_NAMESPACE
 
 // JS-to-C++ mouse input bridge (bypasses Emscripten event callbacks)
 extern "C" {

@@ -175,6 +175,19 @@ Viewport* GLES3_RenderRHI::CreateViewport(void* window_handle, Int width, Int he
 		emscripten_webgl_make_context_current(m_gl_context);
 	}
 
+	// Read actual drawing buffer size from GL — the canvas may have been
+	// created at native device resolution (e.g. 852x393 from tt.createCanvas()
+	// vs the hardcoded 1280x960). Use the real size for the viewport.
+	int actual_w = 0, actual_h = 0;
+	emscripten_webgl_get_drawing_buffer_size(m_gl_context, &actual_w, &actual_h);
+	if (actual_w > 0 && actual_h > 0)
+	{
+		std::cout << "[GLES3] Drawing buffer: " << actual_w << "x" << actual_h
+		          << " (requested: " << width << "x" << height << ")" << std::endl;
+		width  = actual_w;
+		height = actual_h;
+	}
+
 	m_viewport = new GLES3_Viewport(m_gl_context, (UInt32)width, (UInt32)height);
 	return m_viewport;
 }
