@@ -20,7 +20,8 @@ public:
 	Bool keys_prev[kMaxKeys] = {};
 
 	// Mouse
-	Float32 mouse_x = 0.0f, mouse_y = 0.0f;
+	Float32 mouse_x = -1.0f, mouse_y = -1.0f;
+	Float32 mouse_frame_start_x = -1.0f, mouse_frame_start_y = -1.0f;
 	Float32 mouse_dx = 0.0f, mouse_dy = 0.0f;
 	Bool mouse_buttons[kMaxMouseButtons] = {};
 	Bool mouse_buttons_prev[kMaxMouseButtons] = {};
@@ -32,11 +33,9 @@ MYRENDERER_END_STRUCT
 
 // Singleton input accumulator. Per-frame: PlatformWindow feeds raw events,
 // then game code queries processed state.
-// Replaces all direct GLFW/PlatformWindow input polling.
 MYRENDERER_BEGIN_CLASS(InputSystem)
 #pragma region METHOD
 public:
-	// Singleton access
 	static InputSystem& METHOD(Get)();
 
 	// Called by PlatformWindow at the START of each frame
@@ -52,8 +51,8 @@ public:
 
 	// Query processed state (called by game code each frame)
 	Bool METHOD(IsKeyDown)(CONST Key& key) CONST;
-	Bool METHOD(IsKeyPressed)(CONST Key& key) CONST;  // edge: not down last frame, down now
-	Bool METHOD(IsKeyReleased)(CONST Key& key) CONST; // edge: down last frame, not down now
+	Bool METHOD(IsKeyPressed)(CONST Key& key) CONST;
+	Bool METHOD(IsKeyReleased)(CONST Key& key) CONST;
 	Bool METHOD(IsMouseDown)(Int btn) CONST;
 	Bool METHOD(IsMousePressed)(Int btn) CONST;
 	Bool METHOD(IsMouseReleased)(Int btn) CONST;

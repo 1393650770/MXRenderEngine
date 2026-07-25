@@ -1,7 +1,6 @@
 #if PLATFORM_GLES3
-// MiniGame Mesh Sample — Phase 2 deliverable
+// MiniGame Mesh Sample - Phase 2 deliverable
 // Verifies: VBO + IBO + VAO rendering, SRB uniform buffer, 3D transform.
-// Rotating textured cube with procedurally-generated checkerboard texture.
 
 #include "Application/SampleApp.h"
 #include "Render/Core/RenderGraph.h"
@@ -25,8 +24,6 @@ using namespace MXRender;
 using namespace MXRender::RHI;
 using namespace MXRender::Render;
 using namespace MXRender::Application;
-
-// ---- GLSL ES 300 es shaders ----
 
 static const char* g_mesh_vs = R"(#version 300 es
 precision highp float;
@@ -52,46 +49,38 @@ void main() {
 }
 )";
 
-// ---- Cube geometry ----
 struct Vertex { float x, y, z, u, v; };
 
+// CCW winding (front faces visible, back-face culling works correctly)
 static const Vertex g_cube_verts[] = {
-    // Front face
-    {-1, 1, 1, 0,1}, {-1,-1, 1, 0,0}, { 1,-1, 1, 1,0},
-    { 1, 1, 1, 1,1}, {-1, 1, 1, 0,1}, { 1,-1, 1, 1,0},
-    // Back face
-    { 1, 1,-1, 0,1}, { 1,-1,-1, 0,0}, {-1,-1,-1, 1,0},
-    {-1, 1,-1, 1,1}, { 1, 1,-1, 0,1}, {-1,-1,-1, 1,0},
-    // Top face
-    {-1, 1,-1, 0,1}, {-1, 1, 1, 0,0}, { 1, 1, 1, 1,0},
-    { 1, 1,-1, 1,1}, {-1, 1,-1, 0,1}, { 1, 1, 1, 1,0},
-    // Bottom face
-    {-1,-1, 1, 0,1}, {-1,-1,-1, 0,0}, { 1,-1,-1, 1,0},
-    { 1,-1, 1, 1,1}, {-1,-1, 1, 0,1}, { 1,-1,-1, 1,0},
-    // Right face
-    { 1, 1, 1, 0,1}, { 1,-1, 1, 0,0}, { 1,-1,-1, 1,0},
-    { 1, 1,-1, 1,1}, { 1, 1, 1, 0,1}, { 1,-1,-1, 1,0},
-    // Left face
-    {-1, 1,-1, 0,1}, {-1,-1,-1, 0,0}, {-1,-1, 1, 1,0},
-    {-1, 1, 1, 1,1}, {-1, 1,-1, 0,1}, {-1,-1, 1, 1,0},
+    // Front (+Z)
+    {-1, 1, 1, 0,1}, { 1,-1, 1, 1,0}, {-1,-1, 1, 0,0},
+    { 1, 1, 1, 1,1}, { 1,-1, 1, 1,0}, {-1, 1, 1, 0,1},
+    // Back (-Z)
+    { 1, 1,-1, 0,1}, {-1,-1,-1, 1,0}, { 1,-1,-1, 0,0},
+    {-1, 1,-1, 1,1}, {-1,-1,-1, 1,0}, { 1, 1,-1, 0,1},
+    // Top (+Y)
+    {-1, 1,-1, 0,1}, { 1, 1, 1, 1,0}, {-1, 1, 1, 0,0},
+    { 1, 1,-1, 1,1}, { 1, 1, 1, 1,0}, {-1, 1,-1, 0,1},
+    // Bottom (-Y)
+    {-1,-1, 1, 0,1}, { 1,-1,-1, 1,0}, {-1,-1,-1, 0,0},
+    { 1,-1, 1, 1,1}, { 1,-1,-1, 1,0}, {-1,-1, 1, 0,1},
+    // Right (+X)
+    { 1, 1, 1, 0,1}, { 1,-1,-1, 1,0}, { 1,-1, 1, 0,0},
+    { 1, 1,-1, 1,1}, { 1,-1,-1, 1,0}, { 1, 1, 1, 0,1},
+    // Left (-X)
+    {-1, 1,-1, 0,1}, {-1,-1, 1, 1,0}, {-1,-1,-1, 0,0},
+    {-1, 1, 1, 1,1}, {-1,-1, 1, 1,0}, {-1, 1,-1, 0,1},
 };
 
-// MVP uniform buffer struct (std140 layout)
-struct MVPBlock
-{
-	float mvp[16];  // column-major mat4
-};
+struct MVPBlock { float mvp[16]; };
 
-// ---- Pass data ----
 struct MeshPassData : public RenderGraphPassDataBase
 {
 	RenderPipelineState* pso = nullptr;
 	ShaderResourceBinding* srb = nullptr;
 	VIRTUAL ~MeshPassData() { Release(); }
-	void Release()
-	{
-		if (srb) { delete srb; srb = nullptr; }
-	}
+	void Release() { if (srb) { delete srb; srb = nullptr; } }
 };
 
 MYRENDERER_BEGIN_CLASS_WITH_DERIVE(MiniGameMesh, public Application::SampleApp)
@@ -125,7 +114,6 @@ void MiniGameMesh::OnInitScene()
 {
 	std::cout << "[MiniGame] Mesh Sample: OnInitScene" << std::endl;
 
-	// ---- Vertex buffer ----
 	BufferDesc vb_desc;
 	vb_desc.size = sizeof(g_cube_verts);
 	vb_desc.type = ENUM_BUFFER_TYPE::Vertex;
@@ -134,13 +122,11 @@ void MiniGameMesh::OnInitScene()
 		memcpy(ptr, g_cube_verts, sizeof(g_cube_verts));
 		g_render_rhi->UnmapBuffer(m_vb); }
 
-	// ---- Uniform buffer (MVP matrix) ----
 	BufferDesc ub_desc;
 	ub_desc.size = sizeof(MVPBlock);
 	ub_desc.type = ENUM_BUFFER_TYPE::Uniform;
 	m_ub = g_render_rhi->CreateBuffer(ub_desc);
 
-	// ---- Texture (64x64 checkerboard) ----
 	const UInt32 tw = 64, th = 64;
 	Vector<UInt32> pixels(tw * th);
 	BuildCheckerboard(pixels.data(), tw, th, 8);
@@ -151,31 +137,25 @@ void MiniGameMesh::OnInitScene()
 	tex_desc.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
 	tex_desc.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
 	m_texture = g_render_rhi->CreateTexture(tex_desc);
-	{   // Texture data upload (will be abstracted via RHI in C2)
-		auto* gl_tex_obj = static_cast<GLES3::GLES3_Texture*>(m_texture);
+	{   auto* gl_tex_obj = static_cast<GLES3::GLES3_Texture*>(m_texture);
 		GLuint gl_tex = gl_tex_obj->GetGLTexture();
 		if (gl_tex) {
 		glBindTexture(GL_TEXTURE_2D, gl_tex);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)tw, (GLsizei)th,
 			GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 		glBindTexture(GL_TEXTURE_2D, 0);
-	}
-	} // end texture upload scope
+	} }
 
-	// ---- Shaders ----
 	ShaderDesc vs_desc; vs_desc.shader_type = ENUM_SHADER_STAGE::Shader_Vertex;
 	vs_desc.debug_name = "mesh_vs";
 	ShaderDataPayload vs_payload; vs_payload.wgsl_source = g_mesh_vs;
 	Shader* vs = RHICreateShader(vs_desc, vs_payload);
-	// GLSL source auto-stored by GLES3_RenderRHI::CreateShader (from wgsl_source field)
 
 	ShaderDesc fs_desc; fs_desc.shader_type = ENUM_SHADER_STAGE::Shader_Pixel;
 	fs_desc.debug_name = "mesh_fs";
 	ShaderDataPayload fs_payload; fs_payload.wgsl_source = g_mesh_fs;
 	Shader* fs = RHICreateShader(fs_desc, fs_payload);
-	// fs GLSL source auto-stored by CreateShader
 
-	// ---- RenderGraph pass ----
 	auto* rdg_pass = graph.AddRenderPass<MeshPassData>("MeshPass", &graph, RHIGetImmediateCommandList(),
 		[&](MeshPassData& data, RenderGraphPassBuilder& builder, CommandList*)
 		{
@@ -210,7 +190,6 @@ void MiniGameMesh::OnInitScene()
 		{
 			BindBackBufferTarget(in_cmd_list);
 
-			// Upload MVP matrix from SceneView
 			CONST auto& vp = m_scene_view.GetViewProjectionMatrix();
 			MVPBlock mvp;
 			memcpy(mvp.mvp, &vp[0][0], sizeof(mvp.mvp));
@@ -223,7 +202,7 @@ void MiniGameMesh::OnInitScene()
 			in_cmd_list->SetVertexBuffer(m_vb, 0, sizeof(Vertex), 0);
 
 			DrawAttribute draw_attr;
-			draw_attr.vertexCount = 36;  // 6 faces x 6 vertices (triangle list)
+			draw_attr.vertexCount = 36;
 			draw_attr.instanceCount = 1;
 			in_cmd_list->Draw(draw_attr);
 		});
@@ -235,7 +214,6 @@ void MiniGameMesh::OnInitScene()
 
 void MiniGameMesh::OnUpdate(Float32 dt)
 {
-	// Update camera from mouse/touch input
 	m_camera.Update(dt, 1280, 960, m_scene_view);
 }
 

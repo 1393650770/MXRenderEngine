@@ -13,16 +13,18 @@ InputSystem& InputSystem::Get()
 
 void InputSystem::BeginFrame()
 {
-	// Swap prev/current keyboard state
 	std::memcpy(m_state.keys_prev, m_state.keys, sizeof(m_state.keys));
-	// Reset per-frame accumulators
 	m_state.mouse_dx = 0.0f;
 	m_state.mouse_dy = 0.0f;
 	m_state.scroll_delta = 0.0f;
-	// Swap mouse buttons
 	std::memcpy(m_state.mouse_buttons_prev, m_state.mouse_buttons, sizeof(m_state.mouse_buttons));
-	// Clear touch (will be re-filled by FeedTouch)
 	m_state.touch.pointer_count = 0;
+
+	// Save current mouse position as frame-start reference.
+	// GetMouseDelta returns displacement from this reference, so
+	// sub-pixel jitter that oscillates cancels out (net delta ~= 0).
+	m_state.mouse_frame_start_x = m_state.mouse_x;
+	m_state.mouse_frame_start_y = m_state.mouse_y;
 
 	if (m_first_frame)
 	{
@@ -46,8 +48,15 @@ void InputSystem::FeedKeyUp(Int code)
 
 void InputSystem::FeedMousePos(Float32 x, Float32 y)
 {
-	m_state.mouse_dx = x - m_state.mouse_x;
-	m_state.mouse_dy = y - m_state.mouse_y;
+	// First mouse event: just store position, no delta (avoids 0→cursor jump)
+	if (m_state.mouse_x < 0.0f)
+	{
+		m_state.mouse_x = x;
+		m_state.mouse_y = y;
+		return;
+	}
+	m_state.mouse_dx += x - m_state.mouse_x;
+	m_state.mouse_dy += y - m_state.mouse_y;
 	m_state.mouse_x = x;
 	m_state.mouse_y = y;
 }
@@ -113,8 +122,19 @@ void InputSystem::GetMousePos(Float32& x, Float32& y) CONST
 
 void InputSystem::GetMouseDelta(Float32& dx, Float32& dy) CONST
 {
-	dx = m_state.mouse_dx;
-	dy = m_state.mouse_dy;
+	// Delta from frame-start position (not accumulated intermediate deltas).
+	// This cancels out sub-pixel jitter: if the mouse oscillates around
+	// a point, the net displacement from frame_start is near zero.
+	if (m_state.mouse_frame_start_x >= 0.0f)
+	{
+		dx = m_state.mouse_x - m_state.mouse_frame_start_x;
+		dy = m_state.mouse_y - m_state.mouse_frame_start_y;
+	}
+	else
+	{
+		dx = m_state.mouse_dx;
+		dy = m_state.mouse_dy;
+	}
 }
 
 Float32 InputSystem::GetScrollDelta() CONST { return m_state.scroll_delta; }

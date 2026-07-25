@@ -61,7 +61,7 @@ static EM_BOOL OnKeyDown(int eventType, const EmscriptenKeyboardEvent* e, void* 
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedKeyDown(e->keyCode);
+	MXRender::Input::InputSystem::Get().FeedKeyDown(e->keyCode);
 	return EM_TRUE;
 }
 
@@ -70,7 +70,7 @@ static EM_BOOL OnKeyUp(int eventType, const EmscriptenKeyboardEvent* e, void* us
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedKeyUp(e->keyCode);
+	MXRender::Input::InputSystem::Get().FeedKeyUp(e->keyCode);
 	return EM_TRUE;
 }
 
@@ -79,7 +79,7 @@ static EM_BOOL OnMouseDown(int eventType, const EmscriptenMouseEvent* e, void* u
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedMouseButton(e->button, true);
+	MXRender::Input::InputSystem::Get().FeedMouseButton(e->button, true);
 	return EM_TRUE;
 }
 
@@ -88,7 +88,7 @@ static EM_BOOL OnMouseUp(int eventType, const EmscriptenMouseEvent* e, void* use
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedMouseButton(e->button, false);
+	MXRender::Input::InputSystem::Get().FeedMouseButton(e->button, false);
 	return EM_TRUE;
 }
 
@@ -97,7 +97,7 @@ static EM_BOOL OnMouseMove(int eventType, const EmscriptenMouseEvent* e, void* u
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedMousePos((Float32)e->canvasX, (Float32)e->canvasY);
+	MXRender::Input::InputSystem::Get().FeedMousePos((Float32)e->canvasX, (Float32)e->canvasY);
 	return EM_TRUE;
 }
 
@@ -114,7 +114,7 @@ static EM_BOOL OnTouchStart(int eventType, const EmscriptenTouchEvent* e, void* 
 	}
 	ts.pointer_count = e->numTouches;
 	self->FeedTouchState(ts);
-	Input::InputSystem::Get().FeedTouch(ts);
+	MXRender::Input::InputSystem::Get().FeedTouch(ts);
 	return EM_TRUE;
 }
 
@@ -129,7 +129,7 @@ static EM_BOOL OnTouchEnd(int eventType, const EmscriptenTouchEvent* e, void* us
 	TouchState ts;
 	ts.pointer_count = 0;
 	self->FeedTouchState(ts);
-	Input::InputSystem::Get().FeedTouch(ts);
+	MXRender::Input::InputSystem::Get().FeedTouch(ts);
 	return EM_TRUE;
 }
 
@@ -138,8 +138,8 @@ static EM_BOOL OnWheel(int eventType, const EmscriptenWheelEvent* e, void* userD
 	(void)eventType;
 	auto* self = STATIC_CAST(userData, EmscriptenGLWindow);
 	(void)userData;
-	Input::InputSystem::Get().FeedMousePos((Float32)e->mouse.canvasX, (Float32)e->mouse.canvasY);
-	Input::InputSystem::Get().FeedScroll((Float32)e->deltaY);
+	MXRender::Input::InputSystem::Get().FeedMousePos((Float32)e->mouse.canvasX, (Float32)e->mouse.canvasY);
+	MXRender::Input::InputSystem::Get().FeedScroll((Float32)e->deltaY);
 	return EM_TRUE;
 }
 
@@ -252,7 +252,7 @@ void EmscriptenGLWindow::FrameCallback(void* arg)
 	}
 
 	RHIRenderEnd();
-	Input::InputSystem::Get().BeginFrame();
+	MXRender::Input::InputSystem::Get().BeginFrame();
 }
 
 // GLES3 platform factory
@@ -263,4 +263,20 @@ UniquePtr<PlatformWindow> CreatePlatformWindow(const String& title, UInt32 w, UI
 
 MYRENDERER_END_NAMESPACE
 
+
+// JS-to-C++ mouse input bridge (bypasses Emscripten event callbacks)
+extern "C" {
+	EMSCRIPTEN_KEEPALIVE void mx_feed_mouse_move(float x, float y) {
+		MXRender::Input::InputSystem::Get().FeedMousePos(x, y);
+	}
+	EMSCRIPTEN_KEEPALIVE void mx_feed_mouse_down(int btn) {
+		MXRender::Input::InputSystem::Get().FeedMouseButton(btn, true);
+	}
+	EMSCRIPTEN_KEEPALIVE void mx_feed_mouse_up(int btn) {
+		MXRender::Input::InputSystem::Get().FeedMouseButton(btn, false);
+	}
+	EMSCRIPTEN_KEEPALIVE void mx_feed_scroll(float delta) {
+		MXRender::Input::InputSystem::Get().FeedScroll(delta);
+	}
+}
 #endif // PLATFORM_GLES3

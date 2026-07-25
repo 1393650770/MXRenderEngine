@@ -4,11 +4,13 @@
 
 // MiniGame Camera Abstraction
 // Patterned after UISystem: virtual with empty defaults.
+// Rotation stored as quaternion — no gimbal lock, no axis drift.
 // Platforms override Update() to poll their input (mouse/touch) and write
 // the camera transform into a SceneView.
 
 #include "Core/ConstDefine.h"
 #include "Render/View/SceneView.h"
+#include <glm/gtc/quaternion.hpp>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Application)
@@ -20,22 +22,28 @@ public:
 	VIRTUAL ~MiniGameCamera() MYDEFAULT;
 
 	// Process input and write camera state into out_view.
-	// Platforms override to read from InputSystem / wx.onTouch / tt.onTouch.
 	VIRTUAL void METHOD(Update)(Float32 dt, UInt32 vp_w, UInt32 vp_h, Render::SceneView& out_view) {}
 
-	// Reset accumulated gesture state
-	VIRTUAL void METHOD(Reset)() {}
+	// Reset orientation to identity
+	VIRTUAL void METHOD(Reset)() { orientation = glm::quat{1,0,0,0}; }
+
+	// Direction vectors extracted from orientation quaternion
+	glm::vec3 METHOD(Forward)() CONST { return orientation * glm::vec3(0, 0, 1); }
+	glm::vec3 METHOD(Right)()   CONST { return orientation * glm::vec3(1, 0, 0); }
+	glm::vec3 METHOD(Up)()      CONST { return orientation * glm::vec3(0, 1, 0); }
+
+	// Orbit eye position from orientation + distance
+	glm::vec3 METHOD(GetEyePosition)() CONST { return target + Forward() * distance; }
 
 #pragma region MEMBER
 public:
-	Float32 yaw        = 0.7f;
-	Float32 pitch      = 0.25f;
-	Float32 distance   = 6.0f;
-	glm::vec3 target   { 0, 0, 0 };
+	glm::quat orientation{ 1, 0, 0, 0 };  // rotation quaternion (identity = look at +Z)
+	Float32   distance   = 6.0f;
+	glm::vec3 target     { 0, 0, 0 };     // orbit center
 	Float32 rotate_speed = 0.005f;
 	Float32 zoom_speed   = 0.1f;
-	Float32 min_dist   = 0.5f;
-	Float32 max_dist   = 100.0f;
+	Float32 min_dist     = 0.5f;
+	Float32 max_dist     = 100.0f;
 protected:
 private:
 #pragma endregion

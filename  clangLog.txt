@@ -314,7 +314,7 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\UI\Widget\UIWidgetManager.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\CameraController.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Render\View\SceneView.h \
-  glm\glm.hpp glm\gtc\matrix_transform.hpp \
+  glm\glm.hpp glm\gtc\matrix_transform.hpp glm\gtc\quaternion.hpp \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\MiniGameCamera.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Application\SampleApp.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Render\RenderInterface.h \

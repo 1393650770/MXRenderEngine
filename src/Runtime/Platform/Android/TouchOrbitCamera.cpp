@@ -22,6 +22,9 @@ Bool TouchOrbitCamera::IsTwoFinger(CONST TouchState& touch) CONST
 
 void TouchOrbitCamera::Reset()
 {
+	orientation = glm::quat{1, 0, 0, 0};
+	distance = 10.0f;
+	target = glm::vec3(0, 0, 0);
 	last_pointer_count = 0;
 	last_x = last_y = 0.0f;
 	last_pinch = 0.0f;
@@ -41,7 +44,6 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 
 	if (in_touch.pointer_count == 0)
 	{
-		// No fingers on screen — reset tracking
 		was_dragging = false;
 		was_two_finger = false;
 		last_pointer_count = 0;
@@ -50,12 +52,10 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 
 	if (two_finger)
 	{
-		// Two-finger gestures: pinch = zoom, drag = pan
 		Float32 current_pinch = in_touch.pinch_distance;
 
 		if (was_two_finger && last_pinch > 0.0f && current_pinch > 0.0f)
 		{
-			// Pinch zoom
 			Float32 ratio = current_pinch / last_pinch;
 			if (ratio < 0.98f || ratio > 1.02f)
 			{
@@ -63,7 +63,6 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 			}
 			else if (enable_pan)
 			{
-				// Two-finger pan: compute midpoint delta
 				Float32 mid_x = (in_touch.pointers[0].x + in_touch.pointers[1].x) * 0.5f;
 				Float32 mid_y = (in_touch.pointers[0].y + in_touch.pointers[1].y) * 0.5f;
 				Float32 delta_x = mid_x - last_x;
@@ -71,9 +70,9 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 
 				if (fabsf(delta_x) > 0.1f || fabsf(delta_y) > 0.1f)
 				{
-					glm::vec3 forward = -glm::vec3(cosf(pitch) * sinf(yaw), sinf(pitch), cosf(pitch) * cosf(yaw));
-					glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-					glm::vec3 up = glm::normalize(glm::cross(right, forward));
+					glm::vec3 forward = Forward();
+					glm::vec3 right   = Right();
+					glm::vec3 up      = Up();
 					Float32 pan_scale = distance / (Float32)height;
 					target += (-delta_x * right + delta_y * up) * pan_scale;
 				}
@@ -92,14 +91,15 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 		Float32 cx = in_touch.pointers[0].x;
 		Float32 cy = in_touch.pointers[0].y;
 
-		if (was_dragging && (was_two_finger == false))
+		if (was_dragging && !was_two_finger)
 		{
 			Float32 delta_x = cx - last_x;
 			Float32 delta_y = cy - last_y;
 			if (fabsf(delta_x) > 0.1f || fabsf(delta_y) > 0.1f)
 			{
-				yaw += delta_x * rotate_speed;
-				pitch = glm::clamp(pitch + delta_y * rotate_speed, min_pitch, max_pitch);
+				glm::quat rot_y = glm::angleAxis(-delta_x * rotate_speed, glm::vec3(0, 1, 0));
+				glm::quat rot_x = glm::angleAxis(-delta_y * rotate_speed, Right());
+				orientation = glm::normalize(rot_y * orientation * rot_x);
 			}
 		}
 
@@ -111,11 +111,7 @@ void TouchOrbitCamera::Update(CONST TouchState& in_touch, Float32 in_dt,
 
 	last_pointer_count = in_touch.pointer_count;
 
-	// Compute final camera
-	glm::vec3 eye = target + distance * glm::vec3(
-		cosf(pitch) * sinf(yaw),
-		sinf(pitch),
-		cosf(pitch) * cosf(yaw));
+	glm::vec3 eye = target + Forward() * distance;
 	out_view.SetViewport((UInt32)width, (UInt32)height);
 	out_view.SetViewLookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
 	out_view.UpdateMatrices();
