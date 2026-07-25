@@ -74,15 +74,27 @@ void GLES3_ShaderResourceBinding::ApplyBindings(GLuint current_program)
 		GLuint block_idx = glGetUniformBlockIndex(current_program, bb.name.c_str());
 		if (block_idx != GL_INVALID_INDEX)
 		{
-			GLuint bind_point = 0;  // start from binding 0
+			GLuint bind_point = 0;
 			glUniformBlockBinding(current_program, block_idx, bind_point);
 			glBindBufferBase(GL_UNIFORM_BUFFER, bind_point, bb.buffer->GetGLBuffer());
 			continue;
 		}
 
-		// Try as individual uniform (e.g. for non-UBO params)
+		// Try as individual uniform (e.g. uniform mat4, not in a block).
+		// Read from client-side buffer copy (WebGL can't glMapBufferRange with
+		// GL_MAP_READ_BIT, and glGetBufferSubData doesn't exist in GLES 3.0).
 		GLint loc = glGetUniformLocation(current_program, bb.name.c_str());
-		bb.location = loc;
+		if (loc >= 0)
+		{
+			const auto& buf_desc = bb.buffer->GetBufferDesc();
+			// mat4 (64 bytes): upload as glUniformMatrix4fv
+			if (buf_desc.size == sizeof(float) * 16)
+			{
+				const void* data = bb.buffer->GetClientData();
+				if (data)
+					glUniformMatrix4fv(loc, 1, GL_FALSE, static_cast<const GLfloat*>(data));
+			}
+		}
 	}
 }
 

@@ -107,14 +107,13 @@ void MiniGameHelloTriangle::OnInitScene()
 		[&](TriPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd_list)
 		{
 			builder.Write(GetBackBufferResource());
-			if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
+			// No depth/stencil needed for this triangle demo
 
 			RenderGraphiPipelineStateDesc pso_desc;
 			pso_desc.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs_shader;
 			pso_desc.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = fs_shader;
 			pso_desc.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
 			pso_desc.render_targets = { GetBackBuffer() };
-			pso_desc.depth_stencil_view = GetDepthStencil();
 			pso_desc.raster_state.sample_count = 1;
 			pso_desc.blend_state.render_targets.resize(1);
 			pso_desc.depth_stencil_state.depth_test_enable = false;

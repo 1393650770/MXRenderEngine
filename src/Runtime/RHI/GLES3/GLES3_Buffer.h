@@ -24,6 +24,9 @@ public:
 	GLuint METHOD(GetGLBuffer)() CONST { return m_gl_buffer; }
 	GLenum METHOD(GetGLTarget)() CONST { return m_gl_target; }
 
+	// Client-side data (written by Map/Unmap, readable by ApplyBindings)
+	const void* METHOD(GetClientData)() CONST { return m_client_data.data(); }
+
 	// Direct data upload via glBufferSubData (no map/unmap needed)
 	void METHOD(SetData)(const void* data, UInt32 size, UInt32 offset = 0);
 protected:
@@ -35,6 +38,7 @@ protected:
 	GLuint m_gl_buffer = 0;
 	GLenum m_gl_target = GL_ARRAY_BUFFER;
 	void* m_mapped_ptr = nullptr;
+	Vector<UInt8> m_client_data;  // client-side mirror for read-back
 private:
 #pragma endregion
 

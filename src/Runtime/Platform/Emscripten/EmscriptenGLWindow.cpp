@@ -204,11 +204,6 @@ void EmscriptenGLWindow::FrameCallback(void* arg)
 	// Check that RHI and GL context are ready.
 	if (!g_render_rhi) return;
 
-	auto* gles_rhi = static_cast<RHI::GLES3::GLES3_RenderRHI*>(g_render_rhi);
-	if (!gles_rhi->IsReady())
-	{
-		return;
-	}
 
 	// First frame after ready: create viewport and call OnInit
 	if (!self->m_init_done)
@@ -257,6 +252,7 @@ void EmscriptenGLWindow::FrameCallback(void* arg)
 	}
 
 	RHIRenderEnd();
+	Input::InputSystem::Get().BeginFrame();
 }
 
 // GLES3 platform factory

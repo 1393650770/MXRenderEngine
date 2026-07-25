@@ -11,6 +11,7 @@ GLES3_Buffer::GLES3_Buffer(CONST BufferDesc& desc)
 	: Buffer(desc)
 {
 	m_gl_target = TranslateBufferType_ToTarget(desc.type);
+	m_client_data.resize(desc.size, 0);
 }
 
 GLES3_Buffer::~GLES3_Buffer()
@@ -27,14 +28,12 @@ void* GLES3_Buffer::Map(CONST ENUM_MAP_TYPE& map_type, CONST ENUM_MAP_FLAG& map_
 {
 	if (!m_gl_buffer) return nullptr;
 
-	GLbitfield access = GL_MAP_WRITE_BIT;
-	if (EnumHasAnyFlags(map_flag, ENUM_MAP_FLAG::Discard))
-		access |= GL_MAP_INVALIDATE_BUFFER_BIT;
-	if (EnumHasAnyFlags(map_flag, ENUM_MAP_FLAG::DoNotWait))
-		access |= GL_MAP_UNSYNCHRONIZED_BIT;
-
-	glBindBuffer(m_gl_target, m_gl_buffer);
-	m_mapped_ptr = glMapBufferRange(m_gl_target, 0, buffer_desc.size, access);
+	// Return client-side pointer (glMapBufferRange is unreliable in WebGL:
+	// requires INVALIDATE_* flags, and GL_MAP_READ_BIT is unsupported).
+	// Data sync: Unmap() uploads to GL; GetClientData() allows reads.
+	(void)map_type;
+	(void)map_flag;
+	m_mapped_ptr = m_client_data.data();
 	return m_mapped_ptr;
 }
 
@@ -42,8 +41,10 @@ void GLES3_Buffer::Unmap()
 {
 	if (m_gl_buffer && m_mapped_ptr)
 	{
+		// Upload client-side data to GL buffer
 		glBindBuffer(m_gl_target, m_gl_buffer);
-		glUnmapBuffer(m_gl_target);
+		glBufferSubData(m_gl_target, 0, buffer_desc.size, m_client_data.data());
+		glBindBuffer(m_gl_target, 0);
 		m_mapped_ptr = nullptr;
 	}
 }
@@ -51,6 +52,9 @@ void GLES3_Buffer::Unmap()
 void GLES3_Buffer::SetData(const void* data, UInt32 size, UInt32 offset)
 {
 	if (!m_gl_buffer || !data) return;
+	// Also update client-side copy
+	if (offset + size <= m_client_data.size())
+		memcpy(m_client_data.data() + offset, data, size);
 	glBindBuffer(m_gl_target, m_gl_buffer);
 	glBufferSubData(m_gl_target, (GLintptr)offset, (GLsizeiptr)size, data);
 	glBindBuffer(m_gl_target, 0);

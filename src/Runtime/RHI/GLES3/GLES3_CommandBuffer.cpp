@@ -88,14 +88,15 @@ void GLES3_CommandBuffer::SetRenderTarget(CONST Vector<Texture*>& render_targets
 	// Depth/stencil attachment
 	if (depth_stencil)
 	{
-		auto* ds_tex = static_cast<GLES3_Texture*>(depth_stencil);
-		GLuint ds_gl = ds_tex->GetGLTexture();
-		CHECK_WITH_LOG(ds_gl == 0, "GLES3: depth/stencil texture has no GL object");
-		// Attach to FBO if we created one; default FBO can't be modified
-		if (fbo != 0)
-		{
-			glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, ds_gl, 0);
-		}
+			auto* ds_tex = static_cast<GLES3_Texture*>(depth_stencil);
+			// Default FBO (fbo=0) has implicit depth/stencil from WebGL context
+			// creation attrs. Only attach for user-created FBOs.
+			if (fbo != 0)
+			{
+				GLuint ds_gl = ds_tex->GetGLTexture();
+				CHECK_WITH_LOG(ds_gl == 0, "GLES3: depth/stencil texture has no GL object");
+				glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, ds_gl, 0);
+			}
 	}
 
 	// Clear
