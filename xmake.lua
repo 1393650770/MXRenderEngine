@@ -21,7 +21,7 @@ else
     add_requires("imgui v1.89.9-docking", {configs = { glfw_vulkan = true, debug = true, shared = true }})
 end
 if not is_plat("wasm") then
-    add_requires("flatbuffers v1.12.0", { system = false, configs = { vs_runtime = "MT" } })
+    add_requires("flatbuffers v1.12.0", { system = false })
 end
 if not is_plat("android","wasm") then
     add_requires("boost",{ version = "1.84.0",configs = {shared = true,debug=true,cmake=false}})
@@ -79,7 +79,6 @@ end
 
 function CommonLibrarySetting()
     set_languages("clatest", "cxx20")
-    if is_plat("windows") then set_runtimes("MT") end  -- static CRT matches flatbuffers
     PlatformSettings()
     add_headerfiles("src/Runtime/**.h")
     add_files("src/Runtime/**.cpp")
@@ -336,9 +335,6 @@ function CommonProjectSetting()
         set_kind("binary")
     end
     set_languages("clatest", "cxx20")
-    if is_plat("windows") then
-        set_runtimes("MT")  -- static CRT to match flatbuffers(MT)
-    end
     add_defines("RMLUI_STATIC_LIB")
     PlatformSettings()
     add_deps("Runtime")
