@@ -9,6 +9,12 @@
 #include "RHI/RenderBuffer.h"
 #include "Render/Core/RenderGraphDefinition.h"
 #include "Render/Core/RenderGraphSerializer.h"
+#include "Network/NetworkManager.h"
+#if PLATFORM_WIN32 || PLATFORM_LINUX
+#include "Platform/Desktop/DesktopNetwork.h"
+#elif PLATFORM_GLES3
+#include "Platform/MiniGame/MiniGameNetwork.h"
+#endif
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Application)
@@ -47,6 +53,13 @@ void SampleApp::OnInit_Logic(PlatformWindow* in_window, RHI::Viewport* in_viewpo
 			"DepthStencil", backbuffer_dsv->GetTextureDesc(), backbuffer_dsv);
 	}
 
+	// Wire up network subsystem (platform-specific backend)
+#if PLATFORM_WIN32 || PLATFORM_LINUX
+	Network::NetworkManager::Create(new Network::Desktop::DesktopNetwork());
+#elif PLATFORM_GLES3
+	Network::NetworkManager::Create(new Network::MiniGame::MiniGameNetwork());
+#endif
+
 	OnInitScene();
 
 	if (auto_compile)
@@ -56,6 +69,7 @@ void SampleApp::OnInit_Logic(PlatformWindow* in_window, RHI::Viewport* in_viewpo
 void SampleApp::OnShutdown_Logic()
 {
 	OnShutdownScene();
+	Network::NetworkManager::Destroy();
 	graph.Release();
 }
 

@@ -24,6 +24,7 @@
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/Emscripten/EmscriptenWGPUWindow.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/FileDialog.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/FileSystem.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/MiniGame/MiniGameNetwork.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/Platform.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/PlatformAsyncFileIO.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/Platform/PlatformAudio.h"

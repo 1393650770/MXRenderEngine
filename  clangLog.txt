@@ -173,6 +173,7 @@ parser_header.o: \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Emscripten\EmscriptenWGPUWindow.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileDialog.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\FileSystem.h \
+  D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\MiniGame\MiniGameNetwork.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\Platform.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformAsyncFileIO.h \
   D:\Project\GameDevelop\MyRenderer\src\Runtime\Platform\PlatformAudio.h \

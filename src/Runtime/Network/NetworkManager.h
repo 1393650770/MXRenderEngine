@@ -24,6 +24,9 @@ public:
 	void METHOD(Update)() { if (m_backend) m_backend->Update(); }
 	void METHOD(HTTPGet)(const String& url, HTTPCallback cb) { if (m_backend) m_backend->HTTPGet(url, cb); }
 	void METHOD(HTTPPost)(const String& url, const String& body, HTTPCallback cb) { if (m_backend) m_backend->HTTPPost(url, body, cb); }
+	void METHOD(WebSocketConnect)(const String& url, WebSocketCallback on_msg) { if (m_backend) m_backend->WebSocketConnect(url, on_msg); }
+	void METHOD(WebSocketSend)(const String& msg) { if (m_backend) m_backend->WebSocketSend(msg); }
+	void METHOD(WebSocketClose)() { if (m_backend) m_backend->WebSocketClose(); }
 
 protected:
 private:

@@ -158,6 +158,7 @@ function CommonLibrarySetting()
     add_includedirs("src/_Generated", {public = true})
     add_includedirs("src/Runtime", {public = true})
     add_includedirs("src/ThirdParty", {public = true})
+    add_includedirs("src/ThirdParty/entt_src/src", {public = true})
     add_includedirs("src/ThirdParty/TaskScheduler/Scheduler/Include", {public = true})
     add_files("src/ThirdParty/TaskScheduler/Scheduler/Source/**.cpp")
     if is_plat("windows") then
@@ -345,6 +346,7 @@ function CommonProjectSetting()
     add_includedirs("src/_Generated", {public = true})
     add_includedirs("src/Runtime", {public = true})
     add_includedirs("src/ThirdParty", {public = true})
+    add_includedirs("src/ThirdParty/entt_src/src", {public = true})
     if not is_plat("android","wasm") then
         add_packages("vulkansdk")
     end

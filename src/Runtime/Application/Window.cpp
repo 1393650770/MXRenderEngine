@@ -17,6 +17,7 @@
 #include "Render/RenderInterface.h"
 #include "RHI/RenderCommandList.h"
 #include "Render/Core/CommandQueue.h"
+#include "Network/NetworkManager.h"
 #include <limits>
 #include <thread>
 
@@ -100,6 +101,7 @@ void Window::Run(RenderInterface* render)
 		platform_window->PollEvents();
 
 		render->OnUpdate(deltaTime);
+			MXRender::Network::NetworkManager::Get().Update();
 
 		switch (mode)
 		{
