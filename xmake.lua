@@ -12,6 +12,7 @@ else
 end
 if not is_plat("android","wasm") then
     add_requires("assimp","lz4")
+    add_requires("miniaudio 0.11.25", {configs = {headeronly = true}})
 end
 if is_plat("android") then
     add_requires("imgui v1.89.9-docking", {configs = { debug = true, shared = true }})
@@ -86,6 +87,7 @@ function CommonLibrarySetting()
     -- Exclude platform-specific files
     if is_plat("android") then
         remove_files("src/Runtime/Platform/Desktop/**.cpp")
+        remove_files("src/Runtime/Audio/Desktop/**.cpp")
         remove_files("src/Runtime/Application/Android/TouchOrbitCamera.cpp")
         remove_files("src/Runtime/Tool/MeshLoader.cpp")
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
@@ -96,6 +98,7 @@ function CommonLibrarySetting()
         remove_files("src/Runtime/Platform/Android/**")
         remove_files("src/Runtime/Platform/WGPU/**.cpp")  -- legacy path
         remove_files("src/Runtime/Platform/Desktop/**.cpp")  -- GLFW not on wasm
+        remove_files("src/Runtime/Audio/Desktop/**.cpp")  -- miniaudio not on wasm
         remove_files("src/Runtime/Platform/Emscripten/EmscriptenWGPUWindow.cpp")  -- WebGPU backend (keep GLES3)
         remove_files("src/Runtime/Tool/MeshLoader.cpp")
         remove_files("src/Runtime/Asset/MeshAsset.cpp")
@@ -178,7 +181,7 @@ function CommonLibrarySetting()
         add_packages("glm","tinyobjloader","imgui","nlohmann_json","gli","optick","flatbuffers","rttr")
     end
     if not is_plat("android","wasm") then
-        add_packages("assimp","lz4","boost","freetype")
+        add_packages("assimp","lz4","boost","freetype","miniaudio")
     end
     if is_plat("windows") then
         add_packages("glfw")
