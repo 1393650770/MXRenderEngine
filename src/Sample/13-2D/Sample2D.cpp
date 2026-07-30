@@ -2,15 +2,17 @@
 //
 // Demonstrates:
 //   - Camera2D orthographic projection + CameraController2D pan/zoom
-//   - AudioManager: PlayBGM at startup + mouse click triggers SFX
+//   - AudioManager: ImportClip + PlaySFX(handle) with generated PCM audio
 //   - Simple quad-batch sprite rendering (full quad rebuilt per frame for simplicity)
 //   - A colorful cross of quads in world space (draggable, zoomable via scroll)
+//   Zero external audio files required - all sounds are procedurally generated.
 
 #include "Application/SampleApp.h"
 #include "Application/CameraController2D.h"
 #include "Application/Window.h"
 #include "Audio/AudioManager.h"
 #include "Audio/Desktop/MiniAudioEngine.h"
+#include "Audio/AudioClip.h"
 #include "Render/Core/RenderGraph.h"
 #include "Render/Core/RenderGraphPass.h"
 #include "RHI/RenderRHI.h"
@@ -26,6 +28,7 @@
 #include "Input/InputKeys.h"
 #include <iostream>
 #include <cmath>
+
 using namespace MXRender;
 using namespace MXRender::RHI;
 using namespace MXRender::Render;
@@ -47,6 +50,63 @@ struct SpritePassData : public RenderGraphPassDataBase
 	VIRTUAL void Release() OVERRIDE { delete srb; srb = nullptr; }
 };
 
+// ---- Synthesize a simple sine-wave PCM clip (f32 mono) ----
+static AudioClip* GenerateTone(float frequency, float duration_sec, float sample_rate = 44100.0f)
+{
+	auto* clip = new AudioClip();
+	clip->sample_rate = (UInt32)sample_rate;
+	clip->channels = 1;
+	clip->bits_per_sample = 32;
+
+	UInt64 total_frames = (UInt64)(sample_rate * duration_sec);
+	clip->pcm_data.resize((size_t)total_frames * sizeof(float));
+
+	float* samples = reinterpret_cast<float*>(clip->pcm_data.data());
+	for (UInt64 i = 0; i < total_frames; ++i)
+	{
+		float t = (float)i / sample_rate;
+		float envelope = expf(-t * 12.0f); // fast decay
+		samples[i] = sinf(2.0f * 3.14159265f * frequency * t) * 0.3f * envelope;
+	}
+
+	clip->duration_seconds = (Float64)duration_sec;
+	clip->is_valid = true;
+	return clip;
+}
+
+// ---- Synthesize a simple looping melody (a few notes stitched together) ----
+static AudioClip* GenerateLoopingMelody(float sample_rate = 44100.0f)
+{
+	// C-E-G-C' ascending, each 0.2s, 0.8s total
+	float notes[] = { 261.63f, 329.63f, 392.00f, 523.25f };
+	float note_len = 0.20f;
+	UInt64 total_frames = (UInt64)(sample_rate * note_len * 4);
+
+	auto* clip = new AudioClip();
+	clip->sample_rate = (UInt32)sample_rate;
+	clip->channels = 1;
+	clip->bits_per_sample = 32;
+	clip->pcm_data.resize((size_t)total_frames * sizeof(float));
+
+	float* samples = reinterpret_cast<float*>(clip->pcm_data.data());
+	for (int n = 0; n < 4; ++n)
+	{
+		UInt64 start = (UInt64)(sample_rate * note_len * n);
+		UInt64 end = (UInt64)(sample_rate * note_len * (n + 1));
+		for (UInt64 i = start; i < end && i < total_frames; ++i)
+		{
+			float t = (float)(i - start) / sample_rate;
+			float envelope = 1.0f - expf(-t * 30.0f); // fast attack
+			envelope *= expf(-t * 3.0f);               // slow decay per note
+			samples[i] = sinf(2.0f * 3.14159265f * notes[n] * t) * 0.4f * envelope;
+		}
+	}
+
+	clip->duration_seconds = (Float64)note_len * 4;
+	clip->is_valid = true;
+	return clip;
+}
+
 MYRENDERER_BEGIN_CLASS_WITH_DERIVE(Sample2DApp, public Application::SampleApp)
 #pragma region METHOD
 public:
@@ -57,7 +117,7 @@ public:
 	VIRTUAL void OnUpdate(float dt) OVERRIDE FINAL;
 protected:
 private:
-	void PlayStartupBGM();
+	void InitAudio();
 	void HandleMouseClick();
 	void RebuildQuads(QuadVertex* out, UInt32& out_count) CONST;
 #pragma endregion
@@ -71,21 +131,45 @@ protected:
 	RHI::Buffer* m_ib = nullptr;
 	RHI::Buffer* m_param_buf = nullptr;
 	SpriteParams m_cached_params{};
-	AudioClipHandle m_loaded_clip{};
+	AudioClipHandle m_melody_clip{};
+	AudioClipHandle m_beep_clip{};
 	Bool m_mouse_was_down = false;
 	static constexpr UInt32 MAX_QUADS = 64;
 private:
 #pragma endregion
 MYRENDERER_END_CLASS
 
+void Sample2DApp::InitAudio()
+{
+	auto* audio = new Audio::Desktop::MiniAudioEngine();
+	AudioManager::Create(audio);
+
+	// Generate synthetic audio clips (zero file dependencies)
+	AudioClip* beep = GenerateTone(440.0f, 0.12f, 44100.0f);
+	beep->source_path = "synthetic:beep";
+	m_beep_clip = AudioManager::Get().ImportClip(beep);
+	std::cout << "[2D Sample] Generated beep clip (440Hz, 0.12s)" << std::endl;
+
+	AudioClip* melody = GenerateLoopingMelody(44100.0f);
+	melody->source_path = "synthetic:melody";
+	m_melody_clip = AudioManager::Get().ImportClip(melody);
+	std::cout << "[2D Sample] Generated melody clip (C-E-G-C, 0.8s loop)" << std::endl;
+
+	// Play the looping melody at startup
+	if (m_melody_clip.IsValid())
+	{
+		AudioManager::Get().PlaySFX(m_melody_clip);
+		std::cout << "[2D Sample] Playing startup melody" << std::endl;
+	}
+
+	std::cout << "[2D Sample] Audio ready. MMB drag=pan, scroll=zoom, LMB click=beep SFX" << std::endl;
+}
+
 void Sample2DApp::OnInitScene()
 {
 	std::cout << "[2D Sample] Starting 2D Demo with Camera2D + Audio" << std::endl;
 
-	// ---- Audio ----
-	auto* audio = new Audio::Desktop::MiniAudioEngine();
-	AudioManager::Create(audio);
-	std::cout << "[2D Sample] AudioManager created. MMB drag=pan, scroll=zoom, LMB click=SFX" << std::endl;
+	InitAudio();
 
 	// ---- Camera ----
 	m_camera.SetViewport(GetViewportWidth(), GetViewportHeight());
@@ -94,7 +178,7 @@ void Sample2DApp::OnInitScene()
 	m_camera.UpdateMatrices();
 	m_controller.Attach(GetPlatformWindow());
 	m_controller.zoom_step = 0.9f;
-	std::cout << "[2D Sample] Camera2D initialized (ortho 20 world units tall, MMB pan, scroll zoom)" << std::endl;
+	std::cout << "[2D Sample] Camera2D initialized (ortho 20 world units tall)" << std::endl;
 
 	// ---- Vertex buffer (dynamic, rebuilt per frame) ----
 	RHI::BufferDesc vb_desc;
@@ -127,9 +211,9 @@ void Sample2DApp::OnInitScene()
 		builder.Write(GetBackBufferResource());
 
 		Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
-			"Shader/Sample/2D/sprite2d.vert.spv");
+			"Shader/sprite2d.vert.spv");
 		Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
-			"Shader/Sample/2D/sprite2d.frag.spv");
+			"Shader/sprite2d.frag.spv");
 
 		RenderGraphiPipelineStateDesc pd{};
 		pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
@@ -140,7 +224,6 @@ void Sample2DApp::OnInitScene()
 		pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::None;
 		pd.blend_state.render_targets.resize(1);
 
-		// Bindless / inline: vertex attributes from the interleaved buffer
 		VertexInputLayout pos_layout;
 		pos_layout.binding = 0;
 		pos_layout.location = 0;
@@ -184,22 +267,12 @@ void Sample2DApp::OnInitScene()
 			in_cmd->SetGraphicsPipeline(data.pso);
 			in_cmd->SetShaderResourceBinding(data.srb);
 			in_cmd->SetVertexBuffer(m_vb, 0, sizeof(QuadVertex), 0);
-			in_cmd->SetIndexBuffer(m_ib, 0, true);
+			in_cmd->SetIndexBuffer(m_ib, 0, false);
 			in_cmd->DrawIndexed(idx_count, 1, 0, 0, 0);
 		}
 	});
 	pass->SetIsCullable(false);
 	pass->SetShaderPath("Shader/Sample/2D/sprite2d");
-
-	// Start BGM after a short delay (audio files are optional - fails silently)
-	PlayStartupBGM();
-}
-
-void Sample2DApp::PlayStartupBGM()
-{
-	// BGM file is optional; miniaudio engine will silently ignore missing files.
-	AudioManager::Get().PlayBGM("ArcadeBGM.wav", true);
-	std::cout << "[2D Sample] Requested BGM: ArcadeBGM.wav" << std::endl;
 }
 
 void Sample2DApp::HandleMouseClick()
@@ -208,13 +281,15 @@ void Sample2DApp::HandleMouseClick()
 	Bool mouse_down = input.IsMouseDown((Int)MouseButton::Left);
 	if (mouse_down && !m_mouse_was_down)
 	{
-		// Play SFX on each new click
-		AudioManager::Get().PlaySFX("Blip.wav");
+		if (m_beep_clip.IsValid())
+		{
+			AudioManager::Get().PlaySFX(m_beep_clip);
+		}
 		Float32 mx, my;
 		input.GetMousePos(mx, my);
 		glm::vec2 world_pos = m_camera.ScreenToWorld(mx, my);
 		std::cout << "[2D Sample] Click at world (" << world_pos.x << ", "
-			<< world_pos.y << ") + SFX" << std::endl;
+			<< world_pos.y << ") + beep SFX" << std::endl;
 	}
 	m_mouse_was_down = mouse_down;
 }
@@ -241,8 +316,10 @@ void Sample2DApp::RebuildQuads(QuadVertex* out, UInt32& out_count) CONST
 
 void Sample2DApp::OnShutdownScene()
 {
-	if (m_loaded_clip.IsValid())
-		AudioManager::Get().UnloadClip(m_loaded_clip);
+	if (m_beep_clip.IsValid())
+		AudioManager::Get().UnloadClip(m_beep_clip);
+	if (m_melody_clip.IsValid())
+		AudioManager::Get().UnloadClip(m_melody_clip);
 	AudioManager::Destroy();
 
 	delete m_vb; m_vb = nullptr;

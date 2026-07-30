@@ -59,6 +59,9 @@ public:
 
 	// ---- Resource management ----
 	AudioClipHandle METHOD(LoadClip)(CONST String& path);
+	// Import a pre-built AudioClip (created by codegen, etc.) into the registry.
+	// Ownership transfers to the manager; use UnloadClip to free.
+	AudioClipHandle METHOD(ImportClip)(AudioClip* clip);
 	void METHOD(UnloadClip)(AudioClipHandle clip);
 	AudioClip* METHOD(GetClip)(AudioClipHandle clip) CONST;
 

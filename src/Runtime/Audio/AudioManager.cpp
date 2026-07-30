@@ -176,6 +176,15 @@ AudioClipHandle AudioManager::LoadClip(CONST String& path)
 	return handle;
 }
 
+AudioClipHandle AudioManager::ImportClip(AudioClip* clip)
+{
+	if (!clip || !clip->is_valid) return {};
+	GenericHandle h = m_clip_registry.Allocate(clip, clip->source_path);
+	AudioClipHandle handle;
+	handle.value = h;
+	return handle;
+}
+
 void AudioManager::UnloadClip(AudioClipHandle clip)
 {
 	if (!m_backend || !clip.IsValid()) return;
