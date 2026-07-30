@@ -519,6 +519,12 @@ target("RendererSample-NNE_Transformer")
     set_group("Sample")
     after_build(MoveResource)
 
+target("RendererSample-2D")
+    CommonProjectSetting()
+    add_files("src/Sample/13-2D/Sample2D.cpp")
+    set_group("Sample")
+    after_build(MoveResource)
+
 --   2D Fluid Simulation Demo
 target("RendererSample-Fluid2D")
     CommonProjectSetting()
