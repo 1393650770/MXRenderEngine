@@ -3,4 +3,5 @@
 // Aggregate include for all UIWidget BindingTraits.
 
 #include "RmlUIDemo.UIBinding.Gen.h"
+#include "NoitaLike.UIBinding.Gen.h"
 

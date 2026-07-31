@@ -1,0 +1,39 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Stage 1 of the 6-dispatch chain: apply CPU edit events into state A.
+// One thread per event. Events are pre-deduplicated on the CPU side
+// (TerrainEditQueue), so each cell is written by at most one thread.
+#include "world_common.glsl"
+
+layout(local_size_x = 64) in;
+
+struct EditEvent {
+    int x;
+    int y;
+    uint material;
+    uint op;
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Events {
+    uint count;
+    uint pad;
+    EditEvent evts[];
+} events;
+
+layout(std430, set = 0, binding = 1) buffer Cells {
+    uint cells[];
+} cells;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= events.count)
+        return;
+    EditEvent e = events.evts[i];
+    if (e.x < 0 || e.y < 0 || e.x >= int(WORLD_W) || e.y >= int(WORLD_H))
+        return;
+    uint idx = cell_index(uint(e.x), uint(e.y));
+    if (e.op == OP_DEPOSIT && cell_mat(cells.cells[idx]) != MAT_EMPTY)
+        return;
+    cells.cells[idx] = pack_cell(e.material & MAT_MASK, 128u, 0u, 0u);
+}

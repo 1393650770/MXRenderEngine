@@ -124,6 +124,7 @@ namespace MXRender
 		static VkAttachmentLoadOp Translate_AttachmentLoad_To_Vulkan(CONST ENUM_RENDERPASS_ATTACHMENT_LOAD_OP& load_op);
 		static VkImageLayout Translate_ReourceState_To_VulkanImageLayout(CONST ENUM_RESOURCE_STATE& state, bool IsInsideRenderPass = false, bool FragDensityMapInsteadOfShadingRate = false);
 		static VkPipelineStageFlags Translate_ReourceState_To_VulkanPipelineStage(CONST ENUM_RESOURCE_STATE& state);
+		static VkAccessFlags Translate_ReourceState_To_VulkanAccess(CONST ENUM_RESOURCE_STATE& state);
 		static Bool Check_ResourceState_Has_WriteAccess(ENUM_RESOURCE_STATE state);
 		static VkFormat Translate_API_DataTypeEnum_To_Vulkan(ENUM_RENDER_DATA_TYPE data_type);
 		static VkShaderStageFlagBits Translate_ShaderTypeEnum_To_Vulkan(ENUM_SHADER_STAGE shader_type);

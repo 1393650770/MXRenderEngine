@@ -1,0 +1,17 @@
+<rml>
+<head>
+	<link type="text/rcss" href="/RmlUI/NoitaLikeHUD.rcss"/>
+	<title>NoitaLike HUD</title>
+</head>
+<body>
+	<div id="hud-root">
+		<div id="hp-panel">
+			<div id="hp-label">HP</div>
+			<div id="hp-bar-bg">
+				<div id="hp-bar-fill" data-style-width="hp + '%'"/>
+			</div>
+		</div>
+		<div id="score-label">T+<span data-attr-text="score"/></div>
+	</div>
+</body>
+</rml>

@@ -22,6 +22,8 @@ public:
 
 	VIRTUAL void* METHOD(Map)(CONST ENUM_MAP_TYPE& map_type, CONST ENUM_MAP_FLAG& map_flag) FINAL;
 	VIRTUAL void METHOD(Unmap)()  FINAL;
+	VIRTUAL void* METHOD(MapReadback)(UInt32 offset, UInt32 size, Float32 timeout_seconds = 1.0f) FINAL;
+	VIRTUAL void METHOD(FreeReadback)(void* data) FINAL;
 	VkBuffer METHOD(GetBuffer)() CONST;
 	UInt32 METHOD(GetOffset)() CONST;
 	void METHOD(Destroy)();

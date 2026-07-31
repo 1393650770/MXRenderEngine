@@ -1,0 +1,70 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Stage 3 (move_a): checkerboard parity 0 cells move using state A (frozen
+// view - nothing has written B yet). Write target must be parity 1 (orthogonal
+// neighbors of a parity-0 cell are always parity 1), claimed via atomic CAS.
+//
+// Protocol (fixed - do not change without updating world_movement_b):
+//   1. evaluate target T (down / diagonal / horizontal, by material phase)
+//   2. atomicCompSwap(claim[T], 0, 1) wins  -> B[T] = A[my]; B[my] = EMPTY
+//      loses                                 -> B[my] = A[my]
+//   3. parity-0 cells are never claimed in this stage (targets are parity 1),
+//      so no self-claim check is needed.
+// Movement is overwrite-style: the winner replaces the target's old material.
+#include "world_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer StateA { uint cells[]; } state_a;
+layout(std430, set = 0, binding = 1) buffer StateB { uint cells[]; } state_b;
+layout(std430, set = 0, binding = 2) buffer Claim { uint claims[]; } claim;
+layout(std430, set = 0, binding = 3) readonly buffer Props { MaterialProps props[]; } props;
+
+// Try to move into (tx,ty); returns true if a move was performed.
+bool try_move(uint idx, uint packed, int tx, int ty)
+{
+    if (tx < 0 || ty < 0 || tx >= int(WORLD_W) || ty >= int(WORLD_H))
+        return false;
+    uint tidx = cell_index(uint(tx), uint(ty));
+    if (cell_mat(state_a.cells[tidx]) != MAT_EMPTY)
+        return false;
+    if (atomicCompSwap(claim.claims[tidx], 0u, 1u) == 0u)
+    {
+        state_b.cells[tidx] = packed;
+        state_b.cells[idx] = pack_cell(MAT_EMPTY, 128u, 0u, 0u);
+        return true;
+    }
+    return false;
+}
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= WORLD_CELLS)
+        return;
+    uint x = idx % WORLD_W;
+    uint y = idx / WORLD_W;
+    if (((x + y) & 1u) != 0u)
+        return;   // parity 1 handled by move_b
+
+    uint packed = state_a.cells[idx];
+    uint mat = cell_mat(packed);
+    uint phase = props.props[mat].phase;
+
+    if (mat == MAT_EMPTY || phase >= 4u)   // empty, solid, fire: static
+    {
+        state_b.cells[idx] = packed;
+        return;
+    }
+
+    if (try_move(idx, packed, int(x), int(y) - 1)) return;          // down
+    if (try_move(idx, packed, int(x) - 1, int(y) - 1)) return;      // diag-left
+    if (try_move(idx, packed, int(x) + 1, int(y) - 1)) return;      // diag-right
+    if (phase == 2u)   // liquid also spreads horizontally
+    {
+        if (try_move(idx, packed, int(x) - 1, int(y))) return;
+        if (try_move(idx, packed, int(x) + 1, int(y))) return;
+    }
+
+    state_b.cells[idx] = packed;   // stay in place (self-copy)
+}

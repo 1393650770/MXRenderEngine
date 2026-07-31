@@ -653,12 +653,10 @@ void VK_CommandBuffer::ResourceBarrier(ENUM_RESOURCE_STATE src_state, ENUM_RESOU
     VkPipelineStageFlags srcStage = VK_Utils::Translate_ReourceState_To_VulkanPipelineStage(src_state);
     VkPipelineStageFlags dstStage = VK_Utils::Translate_ReourceState_To_VulkanPipelineStage(dst_state);
 
-    VkAccessFlags srcAccess = VK_Utils::Check_ResourceState_Has_WriteAccess(src_state)
-        ? VK_ACCESS_SHADER_WRITE_BIT
-        : VK_ACCESS_SHADER_READ_BIT;
-    VkAccessFlags dstAccess = VK_Utils::Check_ResourceState_Has_WriteAccess(dst_state)
-        ? VK_ACCESS_SHADER_WRITE_BIT
-        : VK_ACCESS_SHADER_READ_BIT;
+    // Full per-bit access translation (fixes IndirectArgument/CopyDest/etc.
+    // producing SHADER_READ instead of the correct access bit).
+    VkAccessFlags srcAccess = VK_Utils::Translate_ReourceState_To_VulkanAccess(src_state);
+    VkAccessFlags dstAccess = VK_Utils::Translate_ReourceState_To_VulkanAccess(dst_state);
 
     pipeline_barrier.memory_src_stages |= srcStage;
     pipeline_barrier.memory_dst_stages |= dstStage;

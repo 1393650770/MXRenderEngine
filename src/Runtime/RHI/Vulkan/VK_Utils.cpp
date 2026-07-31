@@ -1293,8 +1293,7 @@ namespace MXRender
 	}
 
 	VkPipelineStageFlags VK_Utils::Translate_ReourceState_To_VulkanPipelineStage(CONST ENUM_RESOURCE_STATE& state)
-	{
-		VkPipelineStageFlags vulkan_pipeline_stage = 0;
+	{		VkPipelineStageFlags vulkan_pipeline_stage = 0;
 		switch (state)
 		{
 		case ENUM_RESOURCE_STATE::Undefined:
@@ -1378,6 +1377,42 @@ namespace MXRender
 
 		// --   Bitwise AND of multi-bit flags can never equal exactly 1; check non-zero instead
 			return (state & write_access_states) != ENUM_RESOURCE_STATE::Invalid;
+	}
+
+	VkAccessFlags VK_Utils::Translate_ReourceState_To_VulkanAccess(CONST ENUM_RESOURCE_STATE& state)
+	{
+		// Complete per-bit access translation. The state enum is a multi-bit
+		// flag (see GenerricRead), so each bit is checked independently.
+		VkAccessFlags access = 0;
+		if ((state & ENUM_RESOURCE_STATE::VertexBuffer) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::IndexBuffer) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_INDEX_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::ConstantBuffer) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_UNIFORM_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::ShaderResource) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_SHADER_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::UnorderedAccess) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		if ((state & ENUM_RESOURCE_STATE::IndirectArgument) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::RenderTarget) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		if ((state & ENUM_RESOURCE_STATE::DepthWrite) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		if ((state & ENUM_RESOURCE_STATE::DepthRead) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::CopyDest) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_TRANSFER_WRITE_BIT;
+		if ((state & ENUM_RESOURCE_STATE::CopySource) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_TRANSFER_READ_BIT;
+		if ((state & ENUM_RESOURCE_STATE::BuildAsRead) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+		if ((state & ENUM_RESOURCE_STATE::BuildAsWrite) != ENUM_RESOURCE_STATE::Invalid)
+			access |= VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+		if (access == 0)
+			access = VK_ACCESS_MEMORY_READ_BIT;
+		return access;
 	}
 
 	VkFormat VK_Utils::Translate_API_DataTypeEnum_To_Vulkan(ENUM_RENDER_DATA_TYPE data_type)

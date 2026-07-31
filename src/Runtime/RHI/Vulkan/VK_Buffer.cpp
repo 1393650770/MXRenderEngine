@@ -163,7 +163,8 @@ void VK_Buffer::Unmap()
 	Bool is_uav = EnumHasAnyFlags(buffer_desc.type, ENUM_BUFFER_TYPE::Storage);
 	Bool is_staging = EnumHasAnyFlags(buffer_desc.type, ENUM_BUFFER_TYPE::Staging);
 	if (lock_state != LockState::PersistentMapping)
-	{		if (mapping.map_staging_buffer != nullptr && mapping.map_type == ENUM_MAP_TYPE::Read)
+	{
+		if (mapping.map_staging_buffer != nullptr && mapping.map_type == ENUM_MAP_TYPE::Read)
 		{
 			device->GetStagingBufferManager()->ReleaseStagingBuffer(mapping.map_staging_buffer,nullptr);
 		}
@@ -202,6 +203,77 @@ void VK_Buffer::Unmap()
 		FlushMappedMemory();
 	}
 	lock_state = LockState::Unlocked;
+}
+
+void* VK_Buffer::MapReadback(UInt32 offset, UInt32 size, Float32 timeout_seconds)
+{
+	// Host-visible buffers (Staging|Dynamic): return the persistent mapping.
+	Bool is_dynamic = EnumHasAnyFlags(buffer_desc.type, ENUM_BUFFER_TYPE::Dynamic);
+	Bool is_staging = EnumHasAnyFlags(buffer_desc.type, ENUM_BUFFER_TYPE::Staging);
+	if (is_dynamic || is_staging)
+	{
+		void* ptr = allocation.GetMappedPointer(device);
+		if (!ptr)
+			return nullptr;
+		return (UInt8*)ptr + offset;
+	}
+
+	// Device-local: private staging + transfer copy + BLOCK until complete.
+	// Uses vkQueueWaitIdle on the graphics queue first (the producing queue),
+	// then submits the copy and waits for the transfer queue to finish.
+	// Debug/save-time use only - never per frame.
+	BufferDesc staging_desc;
+	staging_desc.size = size;
+	staging_desc.stride = 4;
+	staging_desc.type = ENUM_BUFFER_TYPE::Staging;
+	VK_Buffer* staging = new VK_Buffer(device, staging_desc);
+	if (!staging)
+		return nullptr;
+
+	// Wait for all graphics work to finish so the copy reads settled data.
+	VkQueue graphics_queue = device->GetQueue(ENUM_QUEUE_TYPE::GRAPHICS)->GetQueue();
+	vkQueueWaitIdle(graphics_queue);
+
+	VK_CommandBuffer* cmd = device->GetCommandBufferManager()->GetOrCreateCommandBuffer(ENUM_QUEUE_TYPE::TRANSFER);
+	cmd->Begin();
+	VkBufferCopy region;
+	region.size = size;
+	region.srcOffset = GetOffset() + offset;
+	region.dstOffset = 0;
+	cmd->CopyBuffer(buffer, staging->GetBuffer(), 1, &region);
+	cmd->MemoryBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+		VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+	cmd->End();
+
+	VK_Queue* transfer_queue = device->GetQueue(ENUM_QUEUE_TYPE::TRANSFER);
+	transfer_queue->Submit(cmd);
+
+	// Wait for the transfer queue to drain (blocking readback).
+	VkQueue transfer_vk_queue = transfer_queue->GetQueue();
+	vkQueueWaitIdle(transfer_vk_queue);
+
+	void* data = staging->Map(ENUM_MAP_TYPE::Read, ENUM_MAP_FLAG::None);
+	if (!data)
+	{
+		delete staging;
+		return nullptr;
+	}
+
+	// Store the staging in the mapping so FreeReadback can release it.
+	mapping.map_staging_buffer = staging;
+	mapping.map_type = ENUM_MAP_TYPE::Read;
+	return data;
+}
+
+void VK_Buffer::FreeReadback(void* data)
+{
+	(void)data;
+	if (mapping.map_staging_buffer)
+	{
+		mapping.map_staging_buffer->Unmap();
+		delete mapping.map_staging_buffer;
+		mapping.map_staging_buffer = nullptr;
+	}
 }
 
 
@@ -395,6 +467,5 @@ inline VK_StagingBufferManager::PendingItemPerCmdBuffer::PendingItems* VK_Stagin
 }
 
 MYRENDERER_END_NAMESPACE
-
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE

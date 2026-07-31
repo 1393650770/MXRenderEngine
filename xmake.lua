@@ -525,6 +525,28 @@ target("RendererSample-2D")
     set_group("Sample")
     after_build(MoveResource)
 
+--   Pixel World Demo (Noita-style cellular automaton, CPU Phase 1)
+target("RendererSample-PixelWorld")
+    CommonProjectSetting()
+    add_files("src/Sample/14-PixelWorld/PixelWorldSample.cpp")
+    set_group("Sample")
+    after_build(MoveResource)
+
+--   Noita-like Game Framework Demo (GameApp + ECS + terrain destruction + HUD)
+target("RendererSample-NoitaLike")
+    CommonProjectSetting()
+    add_files("src/Sample/15-NoitaLike/NoitaLike.cpp")
+    set_group("Sample")
+    before_build(function (target)
+        -- Fonts only: RmlUI documents are copied by MoveResource (avoid
+        -- double-copy which nests RmlUI/RmlUI).
+        local outdir = target:targetdir()
+        if os.isdir("$(projectdir)/resource/Font") then
+            os.cp("$(projectdir)/resource/Font", outdir .. "/Font")
+        end
+    end)
+    after_build(MoveResource)
+
 --   2D Fluid Simulation Demo
 target("RendererSample-Fluid2D")
     CommonProjectSetting()

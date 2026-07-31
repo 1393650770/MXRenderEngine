@@ -13,6 +13,15 @@ public:
 	VIRTUAL ~Buffer() MYDEFAULT;
 	VIRTUAL void* METHOD(Map)(CONST ENUM_MAP_TYPE& map_type, CONST ENUM_MAP_FLAG& map_flag) PURE ;
 	VIRTUAL void METHOD(Unmap)() PURE ;
+
+	// Synchronous GPU->CPU readback. For host-visible (Staging|Dynamic)
+	// buffers this returns the persistent mapping directly. For device-local
+	// buffers it copies to a private staging buffer and BLOCKS until the GPU
+	// copy completes (vkQueueWaitIdle). Debug/save-time use only - never per
+	// frame. Returns nullptr on timeout. FreeReadback releases the staging.
+	VIRTUAL void* METHOD(MapReadback)(UInt32 offset, UInt32 size, Float32 timeout_seconds = 1.0f) PURE;
+	VIRTUAL void METHOD(FreeReadback)(void* data) PURE;
+
 	VIRTUAL BufferDesc METHOD(GetBufferDesc)() CONST;
 protected:
 

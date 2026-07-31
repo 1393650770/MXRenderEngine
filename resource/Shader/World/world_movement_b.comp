@@ -1,0 +1,77 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Stage 4 (move_b): checkerboard parity 1 cells. Reads:
+//   - parity 0 neighbors from B (fresh - move_a already wrote them)
+//   - parity 1 neighbors from A (frozen - parity 1 not moved yet)
+// Self-claim check first: a parity-1 cell claimed by move_a already has its
+// final value in B, so skip it.
+#include "world_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer StateA { uint cells[]; } state_a;
+layout(std430, set = 0, binding = 1) buffer StateB { uint cells[]; } state_b;
+layout(std430, set = 0, binding = 2) buffer Claim { uint claims[]; } claim;
+layout(std430, set = 0, binding = 3) readonly buffer Props { MaterialProps props[]; } props;
+
+uint read_cell(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= int(WORLD_W) || y >= int(WORLD_H))
+        return 0u;
+    uint idx = cell_index(uint(x), uint(y));
+    // parity 0 neighbors: read B (fresh); parity 1: read A (frozen)
+    if (((uint(x) + uint(y)) & 1u) == 0u)
+        return state_b.cells[idx];
+    return state_a.cells[idx];
+}
+
+bool try_move(uint idx, uint packed, int tx, int ty)
+{
+    if (tx < 0 || ty < 0 || tx >= int(WORLD_W) || ty >= int(WORLD_H))
+        return false;
+    uint tidx = cell_index(uint(tx), uint(ty));
+    if (read_cell(tx, ty) != 0u)
+        return false;
+    if (atomicCompSwap(claim.claims[tidx], 0u, 1u) == 0u)
+    {
+        state_b.cells[tidx] = packed;
+        state_b.cells[idx] = pack_cell(MAT_EMPTY, 128u, 0u, 0u);
+        return true;
+    }
+    return false;
+}
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= WORLD_CELLS)
+        return;
+    uint x = idx % WORLD_W;
+    uint y = idx / WORLD_W;
+    if (((x + y) & 1u) == 0u)
+        return;   // parity 0 handled by move_a
+
+    if (claim.claims[idx] != 0u)
+        return;   // already filled by move_a (B[idx] is final)
+
+    uint packed = state_a.cells[idx];
+    uint mat = cell_mat(packed);
+    uint phase = props.props[mat].phase;
+
+    if (mat == MAT_EMPTY || phase >= 4u)   // empty, solid, fire: static
+    {
+        state_b.cells[idx] = packed;
+        return;
+    }
+
+    if (try_move(idx, packed, int(x), int(y) - 1)) return;
+    if (try_move(idx, packed, int(x) - 1, int(y) - 1)) return;
+    if (try_move(idx, packed, int(x) + 1, int(y) - 1)) return;
+    if (phase == 2u)
+    {
+        if (try_move(idx, packed, int(x) - 1, int(y))) return;
+        if (try_move(idx, packed, int(x) + 1, int(y))) return;
+    }
+
+    state_b.cells[idx] = packed;
+}

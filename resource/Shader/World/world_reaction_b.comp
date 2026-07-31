@@ -1,0 +1,88 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Stage 6 (react_b): checkerboard parity 1 cells. Mirrors world_reaction_a.
+// Every cell processed exactly once per tick (parity split), writes only
+// its own cell in A. No claim buffer.
+#include "world_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer StateB { uint cells[]; } state_b;
+layout(std430, set = 0, binding = 1) buffer StateA { uint cells[]; } state_a;
+layout(std430, set = 0, binding = 2) readonly buffer Props { MaterialProps props[]; } props;
+layout(std430, set = 0, binding = 3) readonly buffer Params { SimParams params; } params;
+
+uint read_cell(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= int(WORLD_W) || y >= int(WORLD_H))
+        return 0u;
+    return state_b.cells[cell_index(uint(x), uint(y))];
+}
+
+bool has_burning_neighbor(int x, int y)
+{
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            if (dx == 0 && dy == 0)
+                continue;
+            uint n = read_cell(x + dx, y + dy);
+            if (cell_mat(n) == MAT_FIRE)
+                return true;
+        }
+    }
+    return false;
+}
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= WORLD_CELLS)
+        return;
+    uint x = idx % WORLD_W;
+    uint y = idx / WORLD_W;
+    if (((x + y) & 1u) == 0u)
+        return;   // parity 0 handled by react_a
+
+    uint packed = state_b.cells[idx];
+    uint mat = cell_mat(packed);
+    uint life = cell_life(packed);
+    uint flags = cell_flag(packed);
+    uint temp = cell_temp(packed);
+
+    if (mat == MAT_FIRE)
+    {
+        if (life == 0u)
+        {
+            state_a.cells[idx] = pack_cell(mat, temp, props.props[mat].lifetime_max, flags | FLAG_BURNING);
+            return;
+        }
+        if (life <= 1u)
+        {
+            state_a.cells[idx] = pack_cell(MAT_EMBER, temp, 0u, flags & ~FLAG_BURNING);
+            return;
+        }
+        state_a.cells[idx] = pack_cell(mat, temp, life - 1u, flags);
+        return;
+    }
+
+    uint phase = props.props[mat].phase;
+    uint flammability = props.props[mat].flammability;
+
+    if (phase == 4u && flammability > 0u)
+    {
+        if (has_burning_neighbor(int(x), int(y)))
+        {
+            uint idx2 = cell_index(x, y);
+            if (rng_hit(idx2, params.params.tick, mat, flammability))
+            {
+                state_a.cells[idx] = pack_cell(MAT_FIRE, temp,
+                    props.props[mat].lifetime_max, flags | FLAG_BURNING);
+                return;
+            }
+        }
+    }
+
+    state_a.cells[idx] = packed;
+}

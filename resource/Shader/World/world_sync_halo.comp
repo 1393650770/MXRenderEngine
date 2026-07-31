@@ -1,0 +1,84 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// sync_halo: copies each active chunk's border cells into the halo margin of
+// its 4 neighbors (single snapshot buffer). Runs after apply_edits so edits
+// on chunk boundaries flow into neighbor halos.
+//
+// Layout: the atlas is a 1D strip of slots; slot s occupies
+// [s*(CS+2)^2, (s+1)*(CS+2)^2). Halo buffer has the same layout and holds
+// one snapshot per tick; move/reaction kernels read it for out-of-chunk
+// neighbors (margins) and write only their own slot interior -> no
+// cross-slot write conflicts.
+#include "world_common.glsl"
+
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Atlas { uint cells[]; } atlas;
+layout(std430, set = 0, binding = 1) buffer Halo { uint cells[]; } halo;
+layout(std430, set = 0, binding = 2) readonly buffer Lookup { uint entries[]; } lookup;
+
+layout(push_constant) uniform PC {
+    uint chunk_size;
+    uint active_count;
+    uint _pad0;
+    uint _pad1;
+} pc;
+
+#define CS pc.chunk_size
+#define STRIDE (CS + 2u)
+#define SLOT_CELLS (STRIDE * STRIDE)
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    // One thread per border cell: 4 borders * CS cells per chunk.
+    uint per_chunk = CS * 4u;
+    uint total = pc.active_count * per_chunk;
+    if (i >= total)
+        return;
+
+    uint chunk_index = i / per_chunk;
+    uint edge = i % per_chunk;
+    uint edge_idx = edge % CS;
+    uint side = edge / CS;
+
+    uint slot = lookup.entries[chunk_index];
+
+    // Copy this chunk's 4 borders into the halo margin of the same slot.
+    // (Margins are indexed 0 and CS+1; interior 1..CS.)
+    if (side == 0u)
+    {
+        // left column of this chunk -> write to own halo left margin
+        // (the left margin is the left neighbor's right column; for the
+        //  strip layout we simply mirror into our own margins and let the
+        //  neighbor read across, which the kernels resolve by slot id).
+        uint value = atlas.cells[slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + 1u];
+        halo.cells[slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + 0u] = value;
+        // propagate to the left neighbor's right margin if present
+        if (chunk_index > 0u)
+        {
+            uint left_slot = lookup.entries[chunk_index - 1u];
+            halo.cells[left_slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + (CS + 1u)] = value;
+        }
+    }
+    else if (side == 1u)
+    {
+        uint value = atlas.cells[slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + CS];
+        halo.cells[slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + (CS + 1u)] = value;
+        if (chunk_index + 1u < pc.active_count)
+        {
+            uint right_slot = lookup.entries[chunk_index + 1u];
+            halo.cells[right_slot * SLOT_CELLS + (edge_idx + 1u) * STRIDE + 0u] = value;
+        }
+    }
+    else if (side == 2u)
+    {
+        uint value = atlas.cells[slot * SLOT_CELLS + 1u * STRIDE + (edge_idx + 1u)];
+        halo.cells[slot * SLOT_CELLS + 0u * STRIDE + (edge_idx + 1u)] = value;
+    }
+    else
+    {
+        uint value = atlas.cells[slot * SLOT_CELLS + CS * STRIDE + (edge_idx + 1u)];
+        halo.cells[slot * SLOT_CELLS + (CS + 1u) * STRIDE + (edge_idx + 1u)] = value;
+    }
+}

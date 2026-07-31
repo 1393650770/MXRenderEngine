@@ -55,7 +55,7 @@ public:
 	void METHOD(RegisterComponent)()
 	{
 		if (!m_backend) return;
-		auto* ennt = DYNAMIC_CAST(m_backend, Ennt::EnntECSSystem);
+		auto* ennt = dynamic_cast<MXRender::ECS::Ennt::EnntECSSystem*>(m_backend);
 		if (ennt) ennt->RegisterComponentType<T>();
 	}
 

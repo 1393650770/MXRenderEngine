@@ -1,0 +1,47 @@
+#hud-root
+{
+	position: absolute;
+	left: 16px;
+	top: 16px;
+	width: 260px;
+	height: 60px;
+	font-size: 14px;
+	color: white;
+}
+
+#hp-panel
+{
+	width: 100%;
+}
+
+#hp-label
+{
+	display: inline-block;
+	width: 30px;
+}
+
+#hp-bar-bg
+{
+	position: relative;
+	display: inline-block;
+	width: 200px;
+	height: 16px;
+	background-color: #333333;
+	overflow: hidden;
+	vertical-align: middle;
+}
+
+#hp-bar-fill
+{
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	background-color: #cc2222;
+}
+
+#score-label
+{
+	margin-top: 8px;
+	color: #aaaaaa;
+}

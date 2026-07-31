@@ -1,0 +1,18 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Stage 2: clear the move-claim buffer. Claim lifetime = stages 2..4 only.
+#include "world_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 0) buffer Claim {
+    uint claims[];
+} claim;
+
+void main()
+{
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= WORLD_CELLS)
+        return;
+    claim.claims[i] = 0u;
+}
