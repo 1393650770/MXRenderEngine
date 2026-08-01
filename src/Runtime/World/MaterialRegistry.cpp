@@ -23,7 +23,7 @@ namespace
 		empty.stable_id = 0;
 		empty.name = "Empty";
 		empty.phase = MaterialPhase::Empty;
-		empty.color = glm::vec3(0.0f, 0.0f, 0.0f);
+		empty.color = glm::vec3(0.15f, 0.15f, 0.18f);  // dark gray - distinguishable from render failure
 		table.push_back(empty);
 
 		// slot 1: Sand (powder)

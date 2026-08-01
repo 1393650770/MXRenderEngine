@@ -47,6 +47,7 @@ public:
 	void METHOD(RegisterDisplayPass)(
 		Render::RenderGraph* graph,
 		Render::RenderGraphResource<RHI::TextureDesc, RHI::Texture>* backbuffer_resource,
+		RHI::Texture* depth_stencil,
 		RHI::CommandList* immediate_cmd);
 
 	// Full mirror upload from the CPU world (Phase 1; Phase 2 switches to the

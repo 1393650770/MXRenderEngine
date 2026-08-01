@@ -15,7 +15,9 @@ void PixelWorldEventQueue::Enqueue(CONST EditEvent& edit)
 	std::lock_guard<std::mutex> lock(mutex_);
 	if (pending_.size() >= kMaxPending)
 	{
-		// Drop oldest to make room (overwrite at front).
+		// Drop the oldest to make room. O(n) per call - acceptable for
+		// bursty init (pre-placed terrain); FlushTo drains in batches so
+		// steady-state gameplay stays well under the cap.
 		pending_.erase(pending_.begin());
 	}
 	pending_.push_back(edit);

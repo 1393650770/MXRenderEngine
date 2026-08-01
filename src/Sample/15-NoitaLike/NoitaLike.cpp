@@ -25,6 +25,9 @@ namespace MXRender { namespace UI { namespace Widget {
 #include "Input/InputKeys.h"
 #include "World/GameWorld.h"
 #include "World/TerrainEditCommand.h"
+#include "World/GpuPixelWorld.h"
+#include "World/IPixelWorldSimulator.h"
+#include "World/MaterialRegistry.h"
 #include "ECS/ECSManager.h"
 #include "Gameplay/Components.h"
 #include "Gameplay/Systems.h"
@@ -39,6 +42,15 @@ using namespace MXRender::RHI;
 using namespace MXRender::Render;
 using namespace MXRender::Application;
 using namespace MXRender::World;
+
+namespace
+{
+	struct SimPassData : public RenderGraphPassDataBase
+	{
+		VIRTUAL ~SimPassData() MYDEFAULT;
+		VIRTUAL void METHOD(Release)() OVERRIDE {}
+	};
+}
 
 World::GameWorld* NoitaLikeApp::CreateGameWorld()
 {
@@ -88,6 +100,9 @@ void NoitaLikeApp::OnGameInit()
 			MXRender::UI::UIManager::Get().Render(cmd);
 		});
 
+	// World rendering: sim pass (GPU simulation) + display pass.
+	RegisterWorldPasses();
+
 	for (auto& pass : graph.GetPasses())
 		pass->SetIsCullable(false);
 
@@ -99,7 +114,81 @@ void NoitaLikeApp::OnGameInit()
 	m_controller.Attach(GetPlatformWindow());
 	m_controller.enable_pan = false;   // game camera: no manual pan
 
+	PreplaceTerrain();
 	SpawnPlayer();
+}
+
+void NoitaLikeApp::RegisterWorldPasses()
+{
+	auto* world = GetWorld();
+	if (!world)
+		return;
+
+	// World display renderer: palette + params + display pass (GPU source).
+	m_world_renderer.Init();
+
+	// Simulation pass (render thread): drives the GPU simulation chain.
+	// The logic thread increments m_pending_ticks once per fixed tick
+	// (see OnGameTick); the execute lambda consumes it and records the
+	// 6-dispatch chain on the render thread.
+	// NOTE: do NOT capture a local simulator pointer in the execute lambda
+	// ([&] would leave a dangling reference after this function returns) -
+	// fetch it fresh from the world each execution.
+	auto* sim_pass = graph.AddRenderPass<SimPassData>("NoitaSim", &graph,
+		RHIGetImmediateCommandList(),
+	[&](SimPassData& data, RenderGraphPassBuilder& builder, CommandList* cmd)
+	{
+		// World buffers are retained/external - no RDG declarations.
+	},
+	[&](CONST SimPassData& data, CommandList* cmd)
+	{
+		UInt32 ticks = m_pending_ticks.exchange(0);
+		IPixelWorldSimulator::SimFrameContext ctx;
+		ctx.cmd = cmd;
+		ctx.pending_ticks = ticks;
+		ctx.frame_index = m_frame_count++;
+		auto* sim = GetWorld() ? GetWorld()->GetSimulator() : nullptr;
+		if (sim)
+			sim->TickFrame(ctx);
+	});
+	sim_pass->SetIsCullable(false);
+	sim_pass->SetShaderPath("Shader/world_apply_edits");
+
+	// Display pass (render thread, AFTER sim so the state is fresh).
+	m_world_renderer.RegisterDisplayPass(&graph, GetBackBufferResource(), GetDepthStencil(),
+		RHIGetImmediateCommandList());
+	auto* gpu_world = dynamic_cast<GpuPixelWorld*>(world->GetSimulator());
+	if (gpu_world)
+	{
+		m_world_renderer.CreateDisplayBindings(gpu_world->GetStateBuffer());
+		m_world_renderer.SetDisplaySource(true);   // GPU authoritative state
+	}
+}
+
+void NoitaLikeApp::PreplaceTerrain()
+{
+	auto* world = GetWorld();
+	if (!world)
+		return;
+	// A stone floor + sand pockets so the world is not empty at startup.
+	// Written directly to the world (not through TerrainEditQueue) - the
+	// queue's ExpandCircle would generate ~49k events and stall the frame.
+	auto* sink = world->GetEditSink();
+	if (!sink)
+		return;
+	// Stone floor: fill the bottom 24 rows.
+	for (Int y = 0; y < 24; ++y)
+	{
+		for (Int x = 0; x < 256; ++x)
+			sink->ApplyEdit({ x, y, MaterialRegistry::GetStone(), kEditOpWrite });
+	}
+	// Sand pockets above the floor.
+	for (Int y = 24; y < 40; ++y)
+	{
+		for (Int x = 100; x < 156; ++x)
+			sink->ApplyEdit({ x, y, MaterialRegistry::GetSand(), kEditOpWrite });
+	}
+	std::cout << "[NoitaLike] terrain pre-placed (stone floor + sand pockets)" << std::endl;
 }
 
 void NoitaLikeApp::SpawnPlayer()
@@ -203,6 +292,10 @@ void NoitaLikeApp::OnGameTick()
 	HandleInput();
 	SyncHud();
 
+	// One simulation tick per game tick (consumed by the sim pass on the
+	// render thread).
+	m_pending_ticks.fetch_add(1);
+
 	// Camera follows the player.
 	auto* tf = GetWorld()->GetECS().GetComponent<Gameplay::TransformComp>(m_player);
 	if (tf)
@@ -214,6 +307,7 @@ void NoitaLikeApp::OnGameTick()
 
 void NoitaLikeApp::OnShutdownScene()
 {
+	m_world_renderer.Shutdown();
 	MXRender::UI::UIManager::Destroy();
 	GameApp::OnShutdownScene();
 }

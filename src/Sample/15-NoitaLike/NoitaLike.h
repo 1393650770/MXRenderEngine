@@ -7,6 +7,8 @@
 #include "UI/Widget/UIWidgetMacros.h"
 #include "UI/UIHandleTypes.h"
 #include "ECS/ECSSystem.h"
+#include "World/PixelWorldRenderer.h"
+#include <atomic>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(World)
@@ -44,6 +46,8 @@ protected:
 	void METHOD(Shoot)();
 	void METHOD(SpawnPlayer)();
 	void METHOD(SyncHud)();
+	void METHOD(RegisterWorldPasses)();
+	void METHOD(PreplaceTerrain)();
 
 private:
 #pragma endregion
@@ -56,6 +60,9 @@ protected:
 	MXRender::UI::UIModelHandle m_hud_model{};
 	MXRender::UI::UIDocHandle m_hud_doc{};
 	MXRender::ECS::EntityHandle m_player{};
+	MXRender::World::PixelWorldRenderer m_world_renderer;
+	std::atomic<UInt32> m_pending_ticks{ 0 };
+	UInt32 m_frame_count = 0;
 	Bool m_prev_fire = false;
 	Int m_prev_hp = -1;
 	Int m_prev_score = -1;

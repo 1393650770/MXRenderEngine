@@ -111,6 +111,7 @@ void PixelWorldRenderer::SetDisplaySource(Bool use_gpu)
 void PixelWorldRenderer::RegisterDisplayPass(
 	Render::RenderGraph* graph,
 	Render::RenderGraphResource<RHI::TextureDesc, RHI::Texture>* backbuffer_resource,
+	RHI::Texture* depth_stencil,
 	RHI::CommandList* immediate_cmd)
 {
 	CHECK_WITH_LOG(graph == nullptr || backbuffer_resource == nullptr, "PixelWorldRenderer: null graph/backbuffer")
@@ -126,6 +127,12 @@ void PixelWorldRenderer::RegisterDisplayPass(
 	pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
 	pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
 	pd.render_targets = { backbuffer_resource->GetActual() };
+	// CRITICAL (2026-08): blend_state.render_targets must be sized to the
+	// render target count. Without it VK_PipelineState builds an empty
+	// VkPipelineColorBlendStateCreateInfo (attachmentCount=0) while dynamic
+	// rendering uses colorAttachmentCount=1 -> VUID violation -> pipeline
+	// creation fails -> bind of VK_NULL_HANDLE is ignored -> black screen.
+	pd.blend_state.render_targets.resize(1);
 	pd.raster_state.sample_count = 1;
 	pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::None;
 	pso_display_ = g_render_rhi->CreateRenderPipelineState(pd);
@@ -150,14 +157,16 @@ void PixelWorldRenderer::RegisterDisplayPass(
 		ShaderResourceBinding* srb = use_gpu_source_ ? srb_gpu_ : srb_mirror_;
 		CHECK_WITH_LOG(srb == nullptr, "PixelWorldRenderer: display SRB not bound")
 
-		static UInt32 s_diag_frames = 0;
-		if (s_diag_frames++ < 5)
-			std::cout << "[PixelWorldRenderer] display pass executing, source="
-				<< (use_gpu_source_ ? "gpu" : "mirror") << std::endl;
-
+		// Standard render-target setup (same pattern as Fluid2D): fetch the
+		// current backbuffer/DSV each execute (swapchain may rebuild), clear
+		// with the texture's own clear values.
 		Vector<Texture*> rtvs = { backbuffer_resource->GetActual() };
-		Vector<ClearValue> clears = { { 0.05f, 0.05f, 0.08f, 1.0f } };
-		cmd->SetRenderTarget(rtvs, nullptr, clears, false);
+		Vector<ClearValue> clears;
+		for (auto rtv : rtvs)
+			clears.push_back(rtv->GetTextureDesc().clear_value);
+		if (depth_stencil)
+			clears.push_back(depth_stencil->GetTextureDesc().clear_value);
+		cmd->SetRenderTarget(rtvs, depth_stencil, clears, depth_stencil != nullptr);
 		cmd->SetGraphicsPipeline(pso_display_);
 		cmd->SetShaderResourceBinding(srb);
 

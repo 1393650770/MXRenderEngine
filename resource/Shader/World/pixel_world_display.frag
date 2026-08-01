@@ -23,13 +23,15 @@ layout(set = 0, binding = 2) readonly buffer WorldParams {
 
 void main()
 {
-    // inUV: (0,0) bottom-left -> world cell (0,0) = bottom row.
+    // inUV: (0,0) is the top-left of the screen in Vulkan clip space (NDC
+    // y goes down). World cell (0,0) is the bottom row, so flip Y:
+    // screen top (inUV.y=0) -> world cell y = h-1 (top row).
     uint w = world_params.world_w;
     uint h = world_params.world_h;
     uint x = uint(inUV.x * float(w));
-    uint y = uint(inUV.y * float(h));
+    uint y = h - 1u - uint(inUV.y * float(h));
     if (x >= w) x = w - 1u;
-    if (y >= h) y = h - 1u;
+    if (y >= h) y = 0u;
 
     uint idx = y * w + x;
     uint mat = world_cells.cells[idx] & 0xFFu;

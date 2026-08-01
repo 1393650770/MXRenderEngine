@@ -1254,7 +1254,8 @@ void VK_CommandBuffer::Replay()
 				barrier.size = c->size;
 				vkCmdPipelineBarrier(command_buffer,
 					VK_PIPELINE_STAGE_TRANSFER_BIT,
-					VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+					VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					0, 0, nullptr, 1, &barrier, 0, nullptr);
 			}
 			break;

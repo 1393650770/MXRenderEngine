@@ -50,7 +50,11 @@ namespace
 	static_assert(sizeof(MaterialPropsGpu) == 48, "MaterialPropsGpu layout must match GLSL (48 bytes)");
 
 	constexpr UInt32 kEventBufferCapacity = 16384;
-	constexpr UInt32 kEventBufferBytes = (2 + kEventBufferCapacity) * sizeof(UInt32);  // count+pad+events
+	// CRITICAL (2026-08): EditEvent is 16 bytes (4 x UInt32). The buffer must
+	// be sized in EditEvent units, not UInt32 units - otherwise FlushTo's
+	// memcpy overflows the buffer -> heap corruption (0xC0000374).
+	// Layout: {UInt32 count; UInt32 pad; EditEvent evts[kEventBufferCapacity]}.
+	constexpr UInt32 kEventBufferBytes = (2 * sizeof(UInt32)) + kEventBufferCapacity * sizeof(EditEvent);
 }
 
 GpuPixelWorld::GpuPixelWorld() MYDEFAULT;

@@ -111,11 +111,22 @@ void PixelWorldSampleApp::OnInitScene()
 	m_renderer.SetDisplaySource(m_use_gpu);
 	std::cout << "[PixelWorld] initial backend: " << (m_use_gpu ? "GPU" : "CPU") << std::endl;
 
-	// Renderer: buffers + palette + display pass (mirror source by default).
+	// Renderer: buffers + palette (no display pass yet - sim pass must be
+	// registered BEFORE display so the mirror update is visible same-frame).
 	m_renderer.Init();
-	m_renderer.RegisterDisplayPass(&graph, GetBackBufferResource(), RHIGetImmediateCommandList());
-	m_renderer.CreateDisplayBindings(m_gpu_world.GetStateBuffer());
+	// Pre-place a sand pile so the screen is not empty at startup. The same
+	// edits go to BOTH backends so CPU and GPU mode both show content.
+	for (Int i = 0; i < 40; ++i)
+	{
+		for (Int j = 0; j < 30; ++j)
+		{
+			EditEvent edit{ 128 + i - 20, 90 + j, MaterialRegistry::GetSand(), kEditOpWrite };
+			m_cpu_world.ApplyEdit(edit);
+			m_gpu_world.ApplyEdit(edit);
+		}
+	}
 	m_renderer.UploadMirror(m_cpu_world);
+	std::cout << "[PixelWorld] pre-placed 40x30 sand block at (108,90)" << std::endl;
 
 	// Simulation pass: runs BEFORE the display pass (RDG executes in
 	// registration order). TickFrame records dispatches on the render thread.
@@ -144,6 +155,11 @@ void PixelWorldSampleApp::OnInitScene()
 	});
 	sim_pass->SetIsCullable(false);
 	sim_pass->SetShaderPath("Shader/world_apply_edits");
+
+	// Display pass: registered AFTER sim (executes after it each frame).
+	m_renderer.RegisterDisplayPass(&graph, GetBackBufferResource(), GetDepthStencil(),
+		RHIGetImmediateCommandList());
+	m_renderer.CreateDisplayBindings(m_gpu_world.GetStateBuffer());
 }
 
 void PixelWorldSampleApp::OnShutdownScene()
