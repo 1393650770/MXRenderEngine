@@ -70,6 +70,12 @@ public:
 
 	UInt64 METHOD(GetFenceSignaledCounter)() CONST;
 
+	// Frame stamp: the frame whose recording this command buffer holds. The
+	// RHI thread reports back this stamp after replay so the render thread can
+	// wait for ITS frame (a shared bool would signal the previous frame).
+	void METHOD(SetRecordedFrame)(UInt64 in_frame) { recorded_frame_ = in_frame; }
+	UInt64 METHOD(GetRecordedFrame)() CONST { return recorded_frame_; }
+
 	void  METHOD(TrainsitionImageLayout)(VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, CONST VkImageSubresourceRange& subresourceRange, VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask);
 	void  METHOD(FlushBarriers)();
 	void  METHOD(MemoryBarrier)(VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask, VkAccessFlags srcAccessMask, VkAccessFlags dstAccessMask);
@@ -330,6 +336,7 @@ protected:
 	Vector<VkSemaphore*> submitted_wait_semaphores;
 	VK_Fence* fence=nullptr;
 	Bool is_upload_only=false;
+	UInt64 recorded_frame_ = 0;   // frame stamp for replay-frame sync
 
 
 	volatile UInt64 fence_signaled_counter;

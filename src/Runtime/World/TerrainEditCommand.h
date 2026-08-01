@@ -39,7 +39,9 @@ public:
 	void METHOD(Push)(CONST TerrainEditCommand& cmd);
 	// Expands all pending commands into per-cell EditEvents (deterministic
 	// order, last-write-wins dedup) and forwards them to the sink.
-	void METHOD(FlushTo)(ITerrainEditSink& sink);
+	// When out_edits is non-null, every applied edit is appended to it so the
+	// caller can mirror the CPU solid mask (Phase 3 collision).
+	void METHOD(FlushTo)(ITerrainEditSink& sink, Vector<EditEvent>* out_edits = nullptr);
 	void METHOD(Reset)();
 	Bool METHOD(HasPending)() CONST { return !commands_.empty(); }
 

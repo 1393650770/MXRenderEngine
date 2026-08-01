@@ -83,6 +83,11 @@ public:
 	VIRTUAL CommandList* METHOD(GetRHICmdListForPresent)() PURE;
 	VIRTUAL void METHOD(SwapCommandLists)() PURE;
 	VIRTUAL Bool METHOD(IsReplayDone)() CONST PURE;
+	// Frame-number replay sync: the render thread waits until the RHI thread
+	// finished replaying ITS frame (a plain bool can signal the previous
+	// frame -> present submits never-replayed commands -> silent drops).
+	VIRTUAL UInt64 METHOD(GetSwapFrame)() CONST { return 0; }
+	VIRTUAL UInt64 METHOD(GetReplayFrame)() CONST { return 0; }
 	VIRTUAL void METHOD(StartRHIThread)() PURE;
 	VIRTUAL void METHOD(StopRHIThread)() PURE;
 	VIRTUAL BindlessManager* METHOD(GetBindlessManager)() PURE;

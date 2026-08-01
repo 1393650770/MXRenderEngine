@@ -123,6 +123,11 @@ CONST MaterialDef* MaterialRegistry::Data()
 	return GetTable().data();
 }
 
+Bool MaterialRegistry::IsSolid(UInt8 slot)
+{
+	return Get(slot).phase == MaterialPhase::Solid;
+}
+
 UInt8 MaterialRegistry::GetEmpty() { return 0; }
 UInt8 MaterialRegistry::GetSand() { return 1; }
 UInt8 MaterialRegistry::GetWater() { return 2; }

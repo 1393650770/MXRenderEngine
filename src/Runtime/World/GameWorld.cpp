@@ -84,8 +84,9 @@ void GameWorld::Tick()
 	// 2. Flush terrain edits into the simulator + CPU solid mask mirror.
 	if (edit_queue_->HasPending())
 	{
-		edit_queue_->FlushTo(*edit_sink_);
-		SyncSolidMask();
+		Vector<EditEvent> flushed;
+		edit_queue_->FlushTo(*edit_sink_, &flushed);
+		SyncSolidMask(flushed);
 	}
 
 	// 3. Advance simulation state.
@@ -116,13 +117,19 @@ void GameWorld::Reset(UInt32 seed)
 	SpawnPlayer();
 }
 
-void GameWorld::SyncSolidMask()
+void GameWorld::SyncSolidMask(CONST Vector<EditEvent>& edits)
 {
-	// The mask mirrors solid materials. With the GPU backend there is no
-	// readback; Phase 3 keeps the mask updated via edit commands + the
-	// deterministic burn replay (implemented in the systems).
-	// NOTE: full mask rebuild from the simulator is only possible on the CPU
-	// backend (Phase 1); the GPU path relies on the edit-driven mirror.
+	// Edit-driven CPU solid mask (Phase 3): every edit applied through the
+	// queue mirrors into the mask, so player AABB collision and projectile
+	// raycasts work against the GPU-authoritative world without a readback.
+	// Write overwrites -> mask = IsSolid(mat); Deposit fills only empty
+	// cells -> non-solid deposits never change the mask.
+	for (CONST auto& edit : edits)
+	{
+		if (edit.op == kEditOpDeposit && !MaterialRegistry::IsSolid(edit.material))
+			continue;
+		collision_->SetSolid(edit.x, edit.y, MaterialRegistry::IsSolid(edit.material));
+	}
 }
 
 ECS::ECSManager& GameWorld::GetECS() CONST

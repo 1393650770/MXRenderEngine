@@ -1242,9 +1242,25 @@ void VK_CommandBuffer::Replay()
 			auto* c = static_cast<RHICmdUpdateBuffer*>(cmd.get());
 			VK_Buffer* vk_buf = STATIC_CAST(c->buffer, VK_Buffer);
 			if (vk_buf) {
+				// Chunked: vkCmdUpdateBuffer has a hard 65536-byte limit per
+				// call (VkPhysicalDeviceLimits::maxUpdateBufferSize). Uploading
+				// the whole shadow (e.g. 262KB event buffers) in one call is
+				// out-of-spec - drivers may partially write or ignore it
+				// entirely (observed: 262KB update silently not reaching the
+				// GPU -> event count stays stale -> edits never applied).
+				constexpr UInt32 kMaxUpdateBytes = 64000;
 				UInt32 buf_offset = vk_buf->GetOffset() + c->offset;
-				vkCmdUpdateBuffer(command_buffer, vk_buf->GetBuffer(),
-					buf_offset, c->size, c->data.data());
+				UInt32 remaining = c->size;
+				UInt32 dst_off = buf_offset;
+				const UInt8* src = c->data.data();
+				while (remaining > 0)
+				{
+					UInt32 chunk = remaining > kMaxUpdateBytes ? kMaxUpdateBytes : remaining;
+					vkCmdUpdateBuffer(command_buffer, vk_buf->GetBuffer(), dst_off, chunk, src);
+					src += chunk;
+					dst_off += chunk;
+					remaining -= chunk;
+				}
 				VkBufferMemoryBarrier barrier{};
 				barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
 				barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;

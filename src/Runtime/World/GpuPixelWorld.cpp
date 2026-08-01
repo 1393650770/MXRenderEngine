@@ -236,7 +236,10 @@ void GpuPixelWorld::RunChain(RHI::CommandList* cmd, UInt32 ticks, UInt32 frame_i
 		UInt32 event_count = event_queue_.GetPendingCount();
 		if (event_count > 0)
 		{
-			event_queue_.FlushTo(events_[frame_index & 1], kEventBufferCapacity);
+			UInt32 flushed = event_queue_.FlushTo(events_[frame_index & 1], kEventBufferCapacity);
+			if (tick_count_ < 3)
+				std::cout << "[GpuWorld] tick=" << tick_count_ << " events=" << event_count
+					<< " flushed=" << flushed << std::endl;
 			Tool::ComputeUtils::DispatchWithBarrier(cmd, pso_apply_edits_, srb_apply_[frame_index & 1],
 				(kEventBufferCapacity + 63) / 64, 1, 1);
 		}

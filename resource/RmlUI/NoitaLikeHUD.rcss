@@ -1,3 +1,10 @@
+body
+{
+	/* Required: without font-family no font face is matched and all text
+	   stays invisible (RmlUI logs "No font face defined"). */
+	font-family: "Ark Pixel 10px Mono latin";
+}
+
 #hud-root
 {
 	position: absolute;

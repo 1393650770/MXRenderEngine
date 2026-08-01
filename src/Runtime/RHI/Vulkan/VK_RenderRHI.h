@@ -68,6 +68,8 @@ public:
 	CommandList* METHOD(GetRHICmdListForPresent)();
 	void METHOD(SwapCommandLists)();   // atomically swap write <=> rhi, signal RHI thread
 	Bool METHOD(IsReplayDone)() CONST; // check if RHI thread finished replay
+	VIRTUAL UInt64 METHOD(GetSwapFrame)() CONST OVERRIDE { return swap_frame_.load(std::memory_order_acquire); }
+	VIRTUAL UInt64 METHOD(GetReplayFrame)() CONST OVERRIDE { return replay_frame_.load(std::memory_order_acquire); }
 	// --
 	VIRTUAL CommandList* METHOD(GetCommandListForQueue)(ENUM_QUEUE_TYPE queue_type) OVERRIDE FINAL;
 	VIRTUAL void METHOD(SubmitCommandList)(CommandList* command_list) OVERRIDE FINAL;
@@ -112,6 +114,8 @@ protected:
 	Vector<VK_CommandBuffer*> defered_command_buffers;
 	std::atomic<bool> replay_ready{false};
 	std::atomic<bool> replay_done{true};
+	std::atomic<UInt64> swap_frame_{0};    // incremented per SwapCommandLists
+	std::atomic<UInt64> replay_frame_{0};  // frame whose replay the RHI thread finished
 	std::atomic<bool> rhi_running{false};
 	std::thread rhi_thread;
 	friend class VK_Viewport;

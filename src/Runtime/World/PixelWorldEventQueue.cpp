@@ -53,10 +53,18 @@ UInt32 PixelWorldEventQueue::FlushTo(RHI::Buffer* dst, UInt32 max_events)
 	UInt32 to_write = pending_.size() < max_events ? (UInt32)pending_.size() : max_events;
 
 	// Buffer layout: {UInt32 count; UInt32 pad; EditEvent evts[]}
+	// IMPORTANT: header + payload in ONE Upload call. Two separate Uploads
+	// to the same buffer go through record-mode shadow memory twice; the
+	// second Map re-creates an uninitialized shadow and its full-buffer
+	// upload overwrites the count written by the first one (observed as
+	// count=0 on the GPU -> apply_edits no-ops -> world stays empty).
 	struct Header { UInt32 count; UInt32 pad; };
 	Header header{ to_write, 0 };
-	Tool::BufferUtils::Upload(dst, &header, sizeof(header), 0);
-	Tool::BufferUtils::Upload(dst, pending_.data(), to_write * sizeof(EditEvent), sizeof(header));
+	Vector<UInt8> blob;
+	blob.resize(sizeof(Header) + to_write * sizeof(EditEvent));
+	std::memcpy(blob.data(), &header, sizeof(header));
+	std::memcpy(blob.data() + sizeof(header), pending_.data(), to_write * sizeof(EditEvent));
+	Tool::BufferUtils::Upload(dst, blob.data(), (UInt32)blob.size(), 0);
 
 	// Consume flushed events (keep the tail if we dropped any).
 	if (to_write < pending_.size())

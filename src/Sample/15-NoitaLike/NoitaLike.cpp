@@ -122,8 +122,13 @@ void NoitaLikeApp::OnGameInit()
 		RHIGetImmediateCommandList(),
 		size[0], size[1],
 		[this](MXRender::RHI::CommandList* cmd) {
+			// Load-mode render target: the world display pass already cleared
+			// + drew. The dsv MUST be attached (RmlUI's PSO declares
+			// depth_stencil_view - a dsv-less render pass fails pipeline bind
+			// and renders nothing); empty clears + has_dsv_clear=false keeps
+			// the world pixels intact.
 			Vector<Texture*> rtvs = { GetBackBufferResource()->GetActual() };
-			cmd->SetRenderTarget(rtvs, nullptr, Vector<ClearValue>{}, false);
+			cmd->SetRenderTarget(rtvs, GetDepthStencil(), Vector<ClearValue>{}, false);
 			MXRender::UI::UIManager::Get().Render(cmd);
 		});
 
@@ -170,10 +175,13 @@ void NoitaLikeApp::RegisterWorldPasses()
 	[&](CONST SimPassData& data, CommandList* cmd)
 	{
 		UInt32 ticks = m_pending_ticks.exchange(0);
+		UInt32 frame = m_frame_count++;
+		if (frame < 5 || frame % 120 == 0)
+			std::cout << "[NoitaLike] frame=" << frame << " pending_ticks=" << ticks << std::endl;
 		IPixelWorldSimulator::SimFrameContext ctx;
 		ctx.cmd = cmd;
 		ctx.pending_ticks = ticks;
-		ctx.frame_index = m_frame_count++;
+		ctx.frame_index = frame;
 		auto* sim = GetWorld() ? GetWorld()->GetSimulator() : nullptr;
 		if (sim)
 			sim->TickFrame(ctx);
@@ -303,16 +311,23 @@ void NoitaLikeApp::PreplaceTerrain()
 	// A stone floor + sand pockets so the world is not empty at startup.
 	// Written directly to the world (not through TerrainEditQueue) - the
 	// queue's ExpandCircle would generate ~49k events and stall the frame.
+	// Stone is SOLID: mirror it into the CPU collision mask here so the
+	// player stands on the floor (queue edits mirror automatically in
+	// GameWorld::SyncSolidMask; direct sink writes must do it manually).
 	auto* sink = world->GetEditSink();
+	auto& collision = world->GetCollision();
 	if (!sink)
 		return;
 	// Stone floor: fill the bottom 24 rows.
 	for (Int y = 0; y < 24; ++y)
 	{
 		for (Int x = 0; x < 256; ++x)
+		{
 			sink->ApplyEdit({ x, y, MaterialRegistry::GetStone(), kEditOpWrite });
+			collision.SetSolid(x, y, true);
+		}
 	}
-	// Sand pockets above the floor.
+	// Sand pockets above the floor (sand is passable - no mask).
 	for (Int y = 24; y < 40; ++y)
 	{
 		for (Int x = 100; x < 156; ++x)
@@ -423,6 +438,11 @@ void NoitaLikeApp::OnGameTick()
 {
 	HandleInput();
 	SyncHud();
+
+	// RmlUI per-frame update (layout dirty-mark propagation, data binding
+	// refresh, animations). Same call as RmlUIDemo::OnUpdate - without it
+	// data-style-width/data-attr-text never refresh and the HUD stays inert.
+	MXRender::UI::UIManager::Get().Update(1.0f / 60.0f);
 
 	// One simulation tick per game tick (consumed by the sim pass on the
 	// render thread).

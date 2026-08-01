@@ -159,7 +159,12 @@ void FrameSynchronizer::RenderThreadMain(RenderInterface* render, RHI::Viewport*
 
 		RHISwapCommandLists();
 
-		while (!RHIIsReplayDone())
+		// Wait for the RHI thread to finish replaying THIS frame (frame-number
+		// sync). The boolean flag alone can signal the previous frame's replay
+		// completion, letting us present a frame whose commands were never
+		// replayed - silently dropping uploads/dispatches recorded that frame.
+		UInt64 my_frame = g_render_rhi->GetSwapFrame();
+		while (g_render_rhi->GetReplayFrame() < my_frame)
 			std::this_thread::yield();
 
 		if (viewport)

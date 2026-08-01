@@ -56,7 +56,7 @@ public:
 
 protected:
 	void METHOD(SpawnPlayer)();
-	void METHOD(SyncSolidMask)();
+	void METHOD(SyncSolidMask)(CONST Vector<EditEvent>& edits);
 	void METHOD(RegisterComponents)();
 
 private:

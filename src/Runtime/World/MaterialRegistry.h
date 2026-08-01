@@ -26,6 +26,9 @@ public:
 	static UInt32 METHOD(GetCount)();
 	static CONST MaterialDef* METHOD(Data)();
 
+	// True for collision-mask materials (Solid phase: stone/wood).
+	static Bool METHOD(IsSolid)(UInt8 slot);
+
 	// Built-in materials (registered lazily on first access)
 	static UInt8 METHOD(GetEmpty)();
 	static UInt8 METHOD(GetSand)();

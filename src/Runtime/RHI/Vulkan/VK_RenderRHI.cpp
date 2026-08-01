@@ -433,6 +433,15 @@ CommandList* VulkanRHI::GetRHICmdListForPresent()
 
 void VulkanRHI::SwapCommandLists()
 {
+	// Stamp the frame onto the JUST-RECORDED write_cb BEFORE swapping it to
+	// rhi_cb - the RHI thread reports this stamp back after replay so the
+	// render thread can wait for ITS frame (a shared bool would signal the
+	// previous frame's completion -> present submits never-replayed
+	// commands -> uploads/dispatches silently dropped, e.g. explosion
+	// edits never reaching the GPU).
+	swap_frame_.fetch_add(1, std::memory_order_acq_rel);
+	write_cb->SetRecordedFrame(swap_frame_.load(std::memory_order_acquire));
+
 	// Swap: the just-recorded write_cb becomes rhi_cb for replay+present
 	std::swap(write_cb, rhi_cb);
 	// Sync immediate_command_buffer so RenderGraph::Execute uses correct CB
@@ -457,6 +466,10 @@ void VulkanRHI::StartRHIThread()
 				rhi_cb->End();  // End CB on RHI thread (same thread as Begin during Replay)
 				replay_ready.store(false, std::memory_order_release);
 				replay_done.store(true, std::memory_order_release);
+				// Record WHICH frame finished replaying: the stamp of the
+				// command buffer we actually replayed (it may lag several
+				// swaps behind the latest one).
+				replay_frame_.store(rhi_cb->GetRecordedFrame(), std::memory_order_release);
 			} else {
 				std::this_thread::yield();
 			}

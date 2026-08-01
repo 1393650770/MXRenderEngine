@@ -61,17 +61,16 @@ void TerrainEditQueue::ExpandCircle(CONST TerrainEditCommand& cmd, Map<UInt32, E
 	}
 }
 
-void TerrainEditQueue::FlushTo(ITerrainEditSink& sink)
+void TerrainEditQueue::FlushTo(ITerrainEditSink& sink, Vector<EditEvent>* out_edits)
 {
 	if (commands_.empty())
 		return;
 
-	// Expand + dedup all commands into a per-cell map (last-write-wins).
+	// Order matters for the last-write-wins dedup: fire FIRST (Deposit, ring
+	// of radius+2), then the main commands. If the carve ran first, the fire
+	// deposit would overwrite the crater-center cells and, being
+	// deposit-only-on-empty, leave the stone intact -> explosions never dig.
 	Map<UInt32, EditEvent> cells;
-	for (CONST auto& cmd : commands_)
-		ExpandCircle(cmd, cells);
-
-	// Explode also deposits fire into the blast ring (2 cells beyond carve).
 	for (CONST auto& cmd : commands_)
 	{
 		if (cmd.type == TerrainEditType::Explode)
@@ -85,10 +84,18 @@ void TerrainEditQueue::FlushTo(ITerrainEditSink& sink)
 			ExpandCircle(fire_cmd, cells);
 		}
 	}
+	for (CONST auto& cmd : commands_)
+		ExpandCircle(cmd, cells);
 
 	// Single pass: apply every unique cell once.
+	if (out_edits)
+		out_edits->reserve(out_edits->size() + cells.size());
 	for (CONST auto& entry : cells)
+	{
 		sink.ApplyEdit(entry.second);
+		if (out_edits)
+			out_edits->push_back(entry.second);
+	}
 
 	commands_.clear();
 }
