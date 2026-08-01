@@ -47,6 +47,7 @@ protected:
 	void METHOD(SpawnPlayer)();
 	void METHOD(SyncHud)();
 	void METHOD(RegisterWorldPasses)();
+	void METHOD(RegisterPlayerPass)();
 	void METHOD(PreplaceTerrain)();
 
 private:
@@ -66,6 +67,11 @@ protected:
 	Bool m_prev_fire = false;
 	Int m_prev_hp = -1;
 	Int m_prev_score = -1;
+
+	// Player sprite (quad drawn on top of the pixel world).
+	RHI::Buffer* m_player_vb = nullptr;
+	RHI::Buffer* m_player_ib = nullptr;
+	RHI::Buffer* m_player_params = nullptr;
 
 private:
 #pragma endregion

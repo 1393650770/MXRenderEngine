@@ -185,10 +185,12 @@ void GpuPixelWorld::CreatePipelinesAndBindings()
 		srb->FlushDescriptorWrites();
 	}
 
-	// Initial state: all empty via the one-shot clear_state dispatch (runs
-	// once on the first TickFrame). Phase 4 chunked generation will rebuild
-	// baseline terrain from the seed.
-	initialized_ = true;
+	// NOTE: initialized_ stays FALSE here on purpose - it means "GPU state has
+	// been cleared", not "resources created" (resources_created_ covers that).
+	// The one-shot clear_state dispatch runs on the FIRST TickFrame; setting
+	// initialized_=true here would skip it forever and leave state_a_/state_b_
+	// as undefined GPU memory (black/garble). Phase 4 chunked generation will
+	// rebuild baseline terrain from the seed.
 }
 
 UInt32 GpuPixelWorld::UploadParams(RHI::CommandList* cmd, UInt32 frame_index)

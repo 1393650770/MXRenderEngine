@@ -21,6 +21,11 @@ namespace MXRender { namespace UI { namespace Widget {
 #include "RHI/RenderResource.h"
 #include "RHI/RenderCommandList.h"
 #include "RHI/RenderViewport.h"
+#include "RHI/RenderPipelineState.h"
+#include "RHI/RenderBuffer.h"
+#include "RHI/RenderTexture.h"
+#include "Tool/BufferUtils.h"
+#include "Tool/ShaderLibrary.h"
 #include "Input/InputSystem.h"
 #include "Input/InputKeys.h"
 #include "World/GameWorld.h"
@@ -49,6 +54,20 @@ namespace
 	{
 		VIRTUAL ~SimPassData() MYDEFAULT;
 		VIRTUAL void METHOD(Release)() OVERRIDE {}
+	};
+
+	// Player sprite (matches sprite2d.vert layout: pos RG32F + uv RG32F).
+	struct PlayerQuadVertex { float x, y, u, v; };
+
+	// Shader uniform block (matches sprite2d.vert binding 0).
+	struct PlayerParams { glm::mat4 mvp; };
+
+	struct PlayerPassData : public RenderGraphPassDataBase
+	{
+		RenderPipelineState* pso = nullptr;
+		ShaderResourceBinding* srb = nullptr;
+		VIRTUAL ~PlayerPassData() MYDEFAULT;
+		VIRTUAL void METHOD(Release)() OVERRIDE { delete srb; srb = nullptr; }
 	};
 }
 
@@ -88,6 +107,13 @@ void NoitaLikeApp::OnGameInit()
 		std::cout << "[NoitaLike] HUD shown" << std::endl;
 	}
 
+	// World rendering: sim pass (GPU simulation) + display pass + player.
+	RegisterWorldPasses();
+
+	// UI pass is registered LAST - the RDG timeline follows registration
+	// order, so the UI must be the final writer of the backbuffer. Its
+	// draw_fn uses a load-mode SetRenderTarget (no clear) so it overlays the
+	// pixel world instead of wiping it (BindBackBufferTarget would clear).
 	auto size = viewport->GetViewportSize();
 	MXRender::UI::RegisterUIPass(
 		&graph,
@@ -96,19 +122,20 @@ void NoitaLikeApp::OnGameInit()
 		RHIGetImmediateCommandList(),
 		size[0], size[1],
 		[this](MXRender::RHI::CommandList* cmd) {
-			BindBackBufferTarget(cmd);
+			Vector<Texture*> rtvs = { GetBackBufferResource()->GetActual() };
+			cmd->SetRenderTarget(rtvs, nullptr, Vector<ClearValue>{}, false);
 			MXRender::UI::UIManager::Get().Render(cmd);
 		});
-
-	// World rendering: sim pass (GPU simulation) + display pass.
-	RegisterWorldPasses();
 
 	for (auto& pass : graph.GetPasses())
 		pass->SetIsCullable(false);
 
-	// Camera setup.
+	// Camera: whole-world overview (192 cells tall = 960 px at 5 px/cell).
+	// Fixed position - follow is disabled until player collision exists
+	// (GPU solid-mask readback, Phase 4), otherwise the player falls through
+	// the world and the camera chases it into the void.
 	camera_.SetViewport(GetViewportWidth(), GetViewportHeight());
-	camera_.SetOrthoSize(30.0f);
+	camera_.SetOrthoSize(192.0f);
 	camera_.SetPosition(glm::vec2(128.0f, 96.0f));
 	camera_.UpdateMatrices();
 	m_controller.Attach(GetPlatformWindow());
@@ -163,6 +190,109 @@ void NoitaLikeApp::RegisterWorldPasses()
 		m_world_renderer.CreateDisplayBindings(gpu_world->GetStateBuffer());
 		m_world_renderer.SetDisplaySource(true);   // GPU authoritative state
 	}
+
+	// Player sprite pass (AFTER display so it overlays the world).
+	RegisterPlayerPass();
+}
+
+void NoitaLikeApp::RegisterPlayerPass()
+{
+	// One quad (4 vertices / 6 indices) rebuilt per frame around the player.
+	RHI::BufferDesc vb_desc;
+	vb_desc.type = ENUM_BUFFER_TYPE::Vertex | ENUM_BUFFER_TYPE::Dynamic;
+	vb_desc.size = sizeof(PlayerQuadVertex) * 4;
+	vb_desc.stride = sizeof(PlayerQuadVertex);
+	m_player_vb = g_render_rhi->CreateBuffer(vb_desc);
+
+	Vector<UInt16> indices = { 0, 1, 2, 2, 3, 0 };
+	RHI::BufferDesc ib_desc;
+	ib_desc.type = ENUM_BUFFER_TYPE::Index | ENUM_BUFFER_TYPE::Dynamic;
+	ib_desc.size = (UInt32)(indices.size() * sizeof(UInt16));
+	ib_desc.stride = sizeof(UInt16);
+	m_player_ib = g_render_rhi->CreateBuffer(ib_desc);
+	Tool::BufferUtils::Upload(m_player_ib, indices.data(), ib_desc.size);
+
+	m_player_params = Tool::BufferUtils::CreateDynamicParamBuffer(sizeof(PlayerParams));
+
+	auto* pass = graph.AddRenderPass<PlayerPassData>("PlayerPass", &graph,
+		RHIGetImmediateCommandList(),
+	[&](PlayerPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+	{
+		builder.Write(GetBackBufferResource());
+
+		Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
+			"Shader/sprite2d.vert.spv");
+		Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
+			"Shader/sprite2d.frag.spv");
+
+		RenderGraphiPipelineStateDesc pd{};
+		pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+		pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+		pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+		pd.render_targets = { GetBackBuffer() };
+		pd.raster_state.sample_count = 1;
+		pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::None;
+		pd.blend_state.render_targets.resize(1);
+
+		VertexInputLayout pos_layout;
+		pos_layout.binding = 0;
+		pos_layout.location = 0;
+		pos_layout.attribute_format = ENUM_TEXTURE_FORMAT::RG32F;
+		pos_layout.input_rate = ENUM_VERTEX_INPUTRATE::PerVertex;
+		pos_layout.offset = 0;
+
+		VertexInputLayout uv_layout;
+		uv_layout.binding = 0;
+		uv_layout.location = 1;
+		uv_layout.attribute_format = ENUM_TEXTURE_FORMAT::RG32F;
+		uv_layout.input_rate = ENUM_VERTEX_INPUTRATE::PerVertex;
+		uv_layout.offset = (UInt32)(sizeof(float) * 2);
+
+		pd.vertex_input_layout.push_back(pos_layout);
+		pd.vertex_input_layout.push_back(uv_layout);
+
+		data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+		data.pso->CreateShaderResourceBinding(data.srb, false);
+		data.srb->SetResource("params", m_player_params);
+		data.srb->FlushDescriptorWrites();
+		delete vs;
+		delete ps;
+	},
+	[=](CONST PlayerPassData& data, CommandList* in_cmd)
+	{
+		auto* tf = GetWorld() ? GetWorld()->GetECS().GetComponent<Gameplay::TransformComp>(m_player) : nullptr;
+		if (!tf)
+			return;
+
+		// Rebuild the quad around the player (world units, sprite shader is
+		// solid white).
+		Float32 hx = tf->half_size.x;
+		Float32 hy = tf->half_size.y;
+		if (hx <= 0.0f || hy <= 0.0f) { hx = 1.0f; hy = 1.0f; }
+		PlayerQuadVertex quads[4] = {
+			{ tf->pos.x - hx, tf->pos.y - hy, 0.0f, 0.0f },
+			{ tf->pos.x + hx, tf->pos.y - hy, 1.0f, 0.0f },
+			{ tf->pos.x + hx, tf->pos.y + hy, 1.0f, 1.0f },
+			{ tf->pos.x - hx, tf->pos.y + hy, 0.0f, 1.0f },
+		};
+		Tool::BufferUtils::Upload(m_player_vb, quads, sizeof(quads));
+
+		PlayerParams params;
+		params.mvp = camera_.GetViewProjectionMatrix();
+		Tool::BufferUtils::Upload(m_player_params, &params, sizeof(params));
+
+		// Load-mode render target: keep the pixel world already drawn, only
+		// overlay the player quad.
+		Vector<Texture*> rtvs = { GetBackBufferResource()->GetActual() };
+		in_cmd->SetRenderTarget(rtvs, nullptr, Vector<ClearValue>{}, false);
+		in_cmd->SetGraphicsPipeline(data.pso);
+		in_cmd->SetShaderResourceBinding(data.srb);
+		in_cmd->SetVertexBuffer(m_player_vb, 0, sizeof(PlayerQuadVertex), 0);
+		in_cmd->SetIndexBuffer(m_player_ib, 0, false);
+		in_cmd->DrawIndexed(6, 1, 0, 0, 0);
+	});
+	pass->SetIsCullable(false);
+	pass->SetShaderPath("Shader/sprite2d");
 }
 
 void NoitaLikeApp::PreplaceTerrain()
@@ -201,8 +331,10 @@ void NoitaLikeApp::SpawnPlayer()
 	ecs.AddComponent<Gameplay::PlayerComp>(m_player);
 	ecs.AddComponent<Gameplay::HealthComp>(m_player);
 	ecs.AddComponent<Gameplay::WandComp>(m_player);
-	// Player spawns in the middle of the world.
-	ecs.GetComponent<Gameplay::TransformComp>(m_player)->pos = glm::vec2(128.0f, 100.0f);
+	// Player spawns in the middle of the world (visible in the fixed
+	// whole-world camera view).
+	ecs.GetComponent<Gameplay::TransformComp>(m_player)->pos = glm::vec2(128.0f, 96.0f);
+	ecs.GetComponent<Gameplay::TransformComp>(m_player)->half_size = glm::vec2(1.2f, 1.2f);
 }
 
 void NoitaLikeApp::HandleInput()
@@ -295,18 +427,18 @@ void NoitaLikeApp::OnGameTick()
 	// One simulation tick per game tick (consumed by the sim pass on the
 	// render thread).
 	m_pending_ticks.fetch_add(1);
-
-	// Camera follows the player.
-	auto* tf = GetWorld()->GetECS().GetComponent<Gameplay::TransformComp>(m_player);
-	if (tf)
-	{
-		camera_.SetPosition(tf->pos);
-		camera_.UpdateMatrices();
-	}
+	// Camera stays at the whole-world overview (see OnGameInit) until player
+	// collision exists (Phase 4) - following the player would chase it into
+	// the void once it falls through the world.
 }
 
 void NoitaLikeApp::OnShutdownScene()
 {
+	// Player sprite buffers (SRB is owned by PlayerPassData::Release).
+	delete m_player_vb; m_player_vb = nullptr;
+	delete m_player_ib; m_player_ib = nullptr;
+	delete m_player_params; m_player_params = nullptr;
+
 	m_world_renderer.Shutdown();
 	MXRender::UI::UIManager::Destroy();
 	GameApp::OnShutdownScene();

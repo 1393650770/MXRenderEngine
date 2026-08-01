@@ -35,6 +35,10 @@ GameWorld::~GameWorld()
 {
 	event_bus_->ClearAll();
 	systems_->Clear();
+	// simulator_ is allocated by the CreateSimulator factory (new GpuPixelWorld)
+	// - owned here, must be released before the ECS singleton dies.
+	delete simulator_;
+	simulator_ = nullptr;
 	ECS::ECSManager::Destroy();
 }
 
