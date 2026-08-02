@@ -4,6 +4,7 @@
 #include "UI/UIRenderer.h"
 #include "UI/UIInputBridge.h"
 #include "RHI/RenderCommandList.h"
+#include "Render/Core/CommandQueue.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
@@ -48,7 +49,13 @@ void UIManager::Destroy()
 
 void UIManager::Update(Float32 dt)
 {
-	if (m_backend) m_backend->Update(dt);
+	if (!m_backend) return;
+	// UI backends (RmlUI) are single-threaded and Render() executes on the
+	// render thread - Update must run there too. Enqueue via the command
+	// channel (flush point runs it before OnPreRender). Calling from the
+	// render thread, or in bypass mode (no render thread), executes inline -
+	// identical semantics everywhere.
+	ENQUEUE_RENDER_COMMAND(UIUpdate)([backend = m_backend, dt]() { backend->Update(dt); });
 }
 
 void UIManager::Render(RHI::CommandList* cmd)
@@ -81,7 +88,13 @@ UIModelHandle UIManager::CreateDataModel(CONST String& name)
 
 void UIManager::DirtyVariable(UIModelHandle model, CONST String& name)
 {
-	if (m_backend) m_backend->DirtyVariable(model, name);
+	if (!m_backend) return;
+	// Same thread-affinity rule as Update (backend data model is single-
+	// threaded; the UI pass writes bound fields on the render thread).
+	ENQUEUE_RENDER_COMMAND(UIDirtyVariable)([backend = m_backend, model, name]()
+	{
+		backend->DirtyVariable(model, name);
+	});
 }
 
 void UIManager::RemoveDataModel(UIModelHandle model)

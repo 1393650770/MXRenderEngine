@@ -1,4 +1,5 @@
 #include "Render/Core/RenderFrameSync.h"
+#include "Render/Core/CommandQueue.h"
 #include "Render/RenderInterface.h"
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderCommandList.h"
@@ -47,8 +48,9 @@ void FrameSynchronizer::SignalFrameReady()
 	cv_render.notify_one();
 }
 
-// NOTE: WaitFrameComplete is kept for Single/RHIThread backward compat.
-// ThreeThread mode no longer calls it; back-pressure is via AcquireWriteSlot only.
+// NOTE: WaitFrameComplete is the LOCKSTEP debug path (MX_FORCE_LOCKSTEP=1).
+// The default ThreeThread flow uses TryRecycleCompleted at frame start and
+// blocks only in AcquireWriteSlot (all 3 slots busy = back-pressure).
 FrameContext* FrameSynchronizer::WaitFrameComplete()
 {
 	std::unique_lock<std::mutex> lock(mtx);
@@ -65,6 +67,23 @@ FrameContext* FrameSynchronizer::WaitFrameComplete()
 	complete_index = (complete_index + 1) % kMaxFramesInFlight;
 	cv_logic.notify_one();
 	return result;
+}
+
+Bool FrameSynchronizer::TryRecycleCompleted()
+{
+	std::lock_guard<std::mutex> lock(mtx);
+	if (slot_states[complete_index] != SlotState::Done)
+		return false;
+
+	slot_states[complete_index] = SlotState::Free;
+	if (frames_in_flight > 0)
+		frames_in_flight--;
+	complete_index = (complete_index + 1) % kMaxFramesInFlight;
+	// MUST wake a logic thread blocked in AcquireWriteSlot (all 3 slots busy
+	// while the render thread finishes - missing this notify deadlocks the
+	// back-pressure path).
+	cv_logic.notify_one();
+	return true;
 }
 
 // === Render Thread API ===
@@ -89,8 +108,23 @@ void FrameSynchronizer::SignalRenderDone()
 		std::lock_guard<std::mutex> lock(mtx);
 		slot_states[render_index] = SlotState::Done;
 		render_index = (render_index + 1) % kMaxFramesInFlight;
+
+		// Recycle eagerly: a logic thread blocked in AcquireWriteSlot (all 3
+		// slots busy = back-pressure) must be woken THIS frame - the logic
+		// thread's own TryRecycleCompleted only runs at frame start, so
+		// waiting for it would deadlock (logic blocked, render done, no one
+		// recycles). The Done check under the same mutex makes double-recycle
+		// impossible (recycling flips the slot to Free).
+		if (slot_states[complete_index] == SlotState::Done)
+		{
+			slot_states[complete_index] = SlotState::Free;
+			if (frames_in_flight > 0)
+				frames_in_flight--;
+			complete_index = (complete_index + 1) % kMaxFramesInFlight;
+		}
 	}
 	cv_complete.notify_one();
+	cv_logic.notify_one();   // wake a logic thread blocked in AcquireWriteSlot
 }
 
 // === Render Thread Lifecycle ===
@@ -132,6 +166,9 @@ void FrameSynchronizer::RenderThreadMain(RenderInterface* render, RHI::Viewport*
 	// Init render resources on the Render thread
 	render->OnInit_Render();
 
+	// Register this thread's id so command-queue enqueues auto-dispatch inline.
+	GetRenderCommandQueue().SetRenderThreadId(std::this_thread::get_id());
+
 	while (render_running.load(std::memory_order_acquire))
 	{
 		FrameContext* ctx = WaitFrameReady();
@@ -146,6 +183,12 @@ void FrameSynchronizer::RenderThreadMain(RenderInterface* render, RHI::Viewport*
 		auto* cmd_list = RHIGetWriteCommandList();
 		cmd_list->SetBypass(false);
 		cmd_list->Begin();
+
+		// Flush logic-thread commands HERE: after Begin (so Record-type bodies
+		// can append to the recording list), before OnPreRender (so resources
+		// created this frame are available to graph.Execute below). Recorded
+		// commands replay in order [Begin][flush][OnPreRender][OnRender]...
+		GetRenderCommandQueue().Flush();
 
 		render->OnPreRender(*ctx);
 
@@ -177,6 +220,12 @@ void FrameSynchronizer::RenderThreadMain(RenderInterface* render, RHI::Viewport*
 
 		SignalRenderDone();
 	}
+
+	// Execute any commands enqueued after the last flush, then shut the queue
+	// down. Order matters: Drain BEFORE OnShutdown_Render (commands may still
+	// reference render resources), and Shutdown() so fence.Wait short-circuits.
+	GetRenderCommandQueue().Drain();
+	GetRenderCommandQueue().Shutdown();
 
 	// Cleanup render resources before exiting
 	render->OnShutdown_Render();

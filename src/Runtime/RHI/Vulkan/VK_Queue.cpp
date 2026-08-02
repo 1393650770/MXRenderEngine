@@ -55,7 +55,7 @@ void VK_Queue::Submit(VK_CommandBuffer* command_list, UInt32 num_signal_semaphor
 	vkQueueSubmit(queue,1,&submitInfo, fence);
 	command_list->command_state = VK_CommandBuffer::EState::Submitted;
 	// Store for later completion check (non-blocking)
-	pending_submits.push_back({fence, command_list, g_frame_number_render_thread});
+	pending_submits.push_back({fence, command_list, g_frame_number_render_thread.load()});
 }
 
 void VK_Queue::CheckCompletion(UInt64 current_frame)

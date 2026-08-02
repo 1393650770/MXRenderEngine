@@ -29,14 +29,14 @@ static void DeferredDestroyVkBuffer(VkDevice device, VkBuffer buf, VkDeviceMemor
 {
 	if (buf == VK_NULL_HANDLE) return;
 	std::lock_guard<std::mutex> lock(g_deferred_vk_mutex);
-	g_deferred_vk_buffers.push_back({buf, mem, g_frame_number_render_thread});
+	g_deferred_vk_buffers.push_back({buf, mem, g_frame_number_render_thread.load()});
 }
 
 void ProcessDeferredVkBuffers(VkDevice device)
 {
 	std::lock_guard<std::mutex> lock(g_deferred_vk_mutex);
-	UInt64 safe = g_frame_number_render_thread >= 3
-		? g_frame_number_render_thread - 3 : 0;
+	UInt64 safe = g_frame_number_render_thread.load() >= 3
+		? g_frame_number_render_thread.load() - 3 : 0;
 	for (Int i = (Int)g_deferred_vk_buffers.size() - 1; i >= 0; --i)
 	{
 		if (g_deferred_vk_buffers[i].frame <= safe)
@@ -432,7 +432,7 @@ void VK_DeviceMemoryManager::Free(VK_DeviceMemoryAllocation*& allocation)
 
 		MemoryBlock& block = memory_block_map[key];
 		block.key = key;
-		MemoryBlock::FreeBlock free_block = { allocation, g_frame_number_render_thread };
+		MemoryBlock::FreeBlock free_block = { allocation, g_frame_number_render_thread.load() };
 		block.allocations.push_back(free_block);
 		return;
 	}
@@ -532,7 +532,7 @@ void VK_DeviceMemoryManager::TrimMemory(Bool is_full_trim)
 	CONST UInt32 small_threshold_partial = 10;
 	CONST UInt64 small_page_size = (8llu << 20);
 
-	UInt32 frame = g_frame_number_render_thread;
+	UInt32 frame = g_frame_number_render_thread.load();
 	for (auto& pair : memory_block_map)
 	{
 		MemoryBlock& block = pair.second;
@@ -1242,7 +1242,7 @@ void VK_MemoryManager::ReleaseSubresourceAllocator(VK_MemoryResourceFragmentAllo
 		}
 		// [AI] Restored: mark when the page was freed so ReleaseFreedResources
 		// can enforce the 3-frame grace period before releasing to OS.
-		subresource_allocator->frame_freed = g_frame_number_render_thread;
+		subresource_allocator->frame_freed = g_frame_number_render_thread.load();
 		free_buffer_allocations[subresource_allocator->pool_size_index].push_back(subresource_allocator);
 	}
 	else
@@ -1337,7 +1337,7 @@ Bool VK_MemoryResourceHeap::TryRealloc(VK_Allocation& out_allocation, VK_Evictab
 UInt32 VK_MemoryResourceFragmentAllocator::DefragTick(VK_Device& device, VK_CommandBuffer* cmd,
 	VK_MemoryResourceHeap* heap, UInt32 max_count)
 {
-	last_defrag_frame = (UInt32)g_frame_number_render_thread;
+	last_defrag_frame = (UInt32)g_frame_number_render_thread.load();
 	is_locked = true;
 
 	UInt32 moved = 0;
@@ -1448,7 +1448,7 @@ void VK_MemoryResourceHeap::DefragTick(VK_Device& device, UInt32 count)
 				continue;
 			if (page->num_sub_allocations == 0)
 				continue;
-			if (g_frame_number_render_thread - page->last_defrag_frame < 100)
+			if (g_frame_number_render_thread.load() - page->last_defrag_frame < 100)
 				continue;
 			if (!page->CanDefrag())
 				continue;
@@ -1569,7 +1569,7 @@ void VK_MemoryManager::ReleaseFreedResources(Bool is_immediately)
 			for (Int index = 0; index < free_allocations.size(); ++index)
 			{
 				VK_MemoryResourceFragmentAllocator* buffer_allocation = free_allocations[index];
-				if (is_immediately || buffer_allocation->frame_freed + VK_NUM_FRAMES_TO_WAIT_BEFORE_RELEASING_TO_OS < g_frame_number_render_thread)
+				if (is_immediately || buffer_allocation->frame_freed + VK_NUM_FRAMES_TO_WAIT_BEFORE_RELEASING_TO_OS < g_frame_number_render_thread.load())
 				{
 					buffer_allocations_to_release.push_back(buffer_allocation);
 					auto it = free_allocations.begin() + index;

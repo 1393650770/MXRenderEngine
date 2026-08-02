@@ -520,7 +520,7 @@ void VulkanRHI::SubmitCommandList(CommandList* command_list)
 void VulkanRHI::RenderEnd()
 {
 	// Check GPU fence completion (non-blocking, async submit mode)
-	device->GetQueue(ENUM_QUEUE_TYPE::GRAPHICS)->CheckCompletion(g_frame_number_render_thread);
+	device->GetQueue(ENUM_QUEUE_TYPE::GRAPHICS)->CheckCompletion(g_frame_number_render_thread.load());
 	device->GetMemoryManager()->ReleaseFreedPages();
 	device->GetStagingBufferManager()->ProcessPendingFree(false, true);
 }

@@ -37,8 +37,14 @@ public:
 	// Mark current write slot as "Ready" for the Render thread.
 	void METHOD(SignalFrameReady)();
 
+	// Non-blocking recycle of one completed frame (Render + RHI present done).
+	// Call at frame start; returns false when nothing is done yet. This is the
+	// "logic leads render" replacement for WaitFrameComplete - the logic
+	// thread only blocks inside AcquireWriteSlot when all 3 slots are busy.
+	Bool METHOD(TryRecycleCompleted)();
+
 	// Block until a frame has completed (Render done + RHI present done).
-	// Returns the completed FrameContext.
+	// Returns the completed FrameContext. Lockstep debug path only.
 	FrameContext* METHOD(WaitFrameComplete)();
 
 	// === Render Thread API ===
@@ -56,6 +62,13 @@ public:
 
 	// === Query ===
 	UInt32 METHOD(GetFramesInFlight)() CONST { return frames_in_flight; }
+
+	// Lockstep debug switch: when true, the logic thread keeps blocking on
+	// WaitFrameComplete every frame (pre-lead behavior). Flip it to bisect
+	// whether a bug is caused by the lead-by-N frame overlap. Set via
+	// MX_FORCE_LOCKSTEP=1 env var in Window::Run.
+	void METHOD(SetForceLockstep)(Bool in_lockstep) { force_lockstep_.store(in_lockstep); }
+	Bool METHOD(IsForceLockstep)() CONST { return force_lockstep_.load(); }
 
 private:
 	void RenderThreadMain(RenderInterface* render, RHI::Viewport* viewport);
@@ -90,6 +103,7 @@ private:
 	// Render thread handle
 	std::thread render_thread;
 	std::atomic<Bool> render_running{false};
+	std::atomic<Bool> force_lockstep_{false};
 
 MYRENDERER_END_CLASS
 

@@ -8,7 +8,7 @@
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
 
-// --   Template library ¡ª built-in and user-defined templates
+// --   Template library â€” built-in and user-defined templates
 MYRENDERER_BEGIN_CLASS(TemplateLibrary)
 public:
 	TemplateLibrary() MYDEFAULT;

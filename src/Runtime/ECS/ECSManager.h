@@ -17,6 +17,7 @@
 // Zero EnTT dependency — the concrete backend is opaque to the application layer.
 
 #include "Core/ConstDefine.h"
+#include "Core/Job/JobSystem.h"      // for JobContext parallel-task guards
 #include "ECS/ECSSystem.h"
 #include "ECS/ComponentTypeID.h"
 #include "ECS/Ennt/EnntECSSystem.h"  // for dynamic_cast in RegisterComponent
@@ -34,13 +35,21 @@ public:
 	ECSSystem* METHOD(GetBackend)() CONST { return m_backend; }
 
 	// ---- Entity lifecycle ----
+	// Structural changes (create/destroy/emplace/remove) are NOT thread-safe
+	// in EnTT. The JobContext guard fires when one happens inside a parallel
+	// task body - the only structural path allowed there is deferred
+	// destruction followed by GarbageCollect in a sequential tail.
 	EntityHandle METHOD(CreateEntity)()
 	{
+		CHECK_WITH_LOG(MXRender::Core::JobContext::IsInParallelTask(),
+			"ECSManager::CreateEntity inside a parallel task (EnTT registry not thread-safe)")
 		return m_backend ? m_backend->CreateEntity() : EntityHandle{};
 	}
 
 	void METHOD(DestroyEntity)(EntityHandle entity)
 	{
+		CHECK_WITH_LOG(MXRender::Core::JobContext::IsInParallelTask(),
+			"ECSManager::DestroyEntity inside a parallel task (EnTT registry not thread-safe)")
 		if (m_backend) m_backend->DestroyEntity(entity);
 	}
 
@@ -62,6 +71,8 @@ public:
 	template<typename T>
 	T* METHOD(AddComponent)(EntityHandle entity)
 	{
+		CHECK_WITH_LOG(MXRender::Core::JobContext::IsInParallelTask(),
+			"ECSManager::AddComponent inside a parallel task (EnTT registry not thread-safe)")
 		if (!m_backend) return nullptr;
 		UInt32 type_id = ComponentTypeID::Get<T>();
 		void* raw = m_backend->AddComponentRaw(entity, type_id, sizeof(T));
@@ -98,6 +109,18 @@ public:
 		m_backend->ForEach(type_ids, std::move(callback));
 	}
 
+	// Typed parallel partition iteration (see EnntECSSystem::ParallelForEach).
+	// Safe from JobSystem workers: component VALUE writes only, no structural
+	// changes (guarded by CHECK_WITH_LOG via JobContext).
+	template<typename... Components>
+	void METHOD(ParallelForEach)(UInt32 partition_index, UInt32 partition_count,
+		CONST std::function<void(Components&...)>& callback)
+	{
+		if (!m_backend) return;
+		auto* ennt = dynamic_cast<MXRender::ECS::Ennt::EnntECSSystem*>(m_backend);
+		if (ennt) ennt->ParallelForEach<Components...>(partition_index, partition_count, callback);
+	}
+
 	// ---- Per-frame ----
 	void METHOD(Update)(Float32 dt)
 	{
@@ -107,6 +130,8 @@ public:
 	// ---- Garbage collect ----
 	void METHOD(GarbageCollect)()
 	{
+		CHECK_WITH_LOG(MXRender::Core::JobContext::IsInParallelTask(),
+			"ECSManager::GarbageCollect inside a parallel task (EnTT registry not thread-safe)")
 		if (m_backend) m_backend->GarbageCollect();
 	}
 protected:

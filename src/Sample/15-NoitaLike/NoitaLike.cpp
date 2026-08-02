@@ -15,6 +15,7 @@ namespace MXRender { namespace UI { namespace Widget {
 	using Application::NoitaLikeApp;
 } } }
 #include "Application/Window.h"
+#include "Core/Job/JobSystem.h"
 #include "Render/Core/RenderGraph.h"
 #include "Render/Core/RenderGraphPass.h"
 #include "RHI/RenderRHI.h"
@@ -29,6 +30,7 @@ namespace MXRender { namespace UI { namespace Widget {
 #include "Input/InputSystem.h"
 #include "Input/InputKeys.h"
 #include "World/GameWorld.h"
+#include "World/FrameSnapshot.h"
 #include "World/TerrainEditCommand.h"
 #include "World/GpuPixelWorld.h"
 #include "World/IPixelWorldSimulator.h"
@@ -50,6 +52,9 @@ using namespace MXRender::World;
 
 namespace
 {
+	// DX demo fence tag (EnqueueRenderCommand<...> template needs a tag type).
+	struct DxDemoFenceTag {};
+
 	struct SimPassData : public RenderGraphPassDataBase
 	{
 		VIRTUAL ~SimPassData() MYDEFAULT;
@@ -84,7 +89,8 @@ World::GameWorld* NoitaLikeApp::CreateGameWorld()
 
 void NoitaLikeApp::OnGameInit()
 {
-	std::cout << "[NoitaLike] world created (seed=42, GPU backend)" << std::endl;
+	std::cout << "[NoitaLike] world created (seed=42, GPU backend) - logic thread id "
+		<< std::this_thread::get_id() << std::endl;
 
 	// RmlUI HUD.
 	auto* rml_system = new MXRender::UI::RmlUI::RmlUISystem();
@@ -107,6 +113,25 @@ void NoitaLikeApp::OnGameInit()
 		std::cout << "[NoitaLike] HUD shown" << std::endl;
 	}
 
+	// [Stress] Spawn extra dynamic entities so the MovementSystem parallel
+	// partition path actually slices large storages (the real game has ~10-30
+	// entities, far below the parallel threshold). These entities are logic-
+	// only: MovementSystem integrates them, nothing renders or reads them.
+	{
+		constexpr UInt32 kStressCount = 4000;
+		auto& ecs = world_->GetECS();
+		for (UInt32 i = 0; i < kStressCount; ++i)
+		{
+			auto e = ecs.CreateEntity();
+			auto* tf = ecs.AddComponent<Gameplay::TransformComp>(e);
+			auto* vel = ecs.AddComponent<Gameplay::VelocityComp>(e);
+			tf->pos = glm::vec2((Float32)(i % 256), (Float32)(i / 256) * 0.5f);
+			vel->vel = glm::vec2((Float32)((i % 7) - 3) * 0.5f, (Float32)((i % 5) - 2) * 0.5f);
+		}
+		std::cout << "[Stress] spawned " << kStressCount << " entities, workers="
+			<< Core::JobSystem::Get().GetWorkerCount() << std::endl;
+	}
+
 	// World rendering: sim pass (GPU simulation) + display pass + player.
 	RegisterWorldPasses();
 
@@ -122,6 +147,31 @@ void NoitaLikeApp::OnGameInit()
 		RHIGetImmediateCommandList(),
 		size[0], size[1],
 		[this](MXRender::RHI::CommandList* cmd) {
+			// HUD bound fields are written HERE on the RENDER thread from the
+			// snapshot (logic thread only fills the snapshot - bound fields
+			// are render-thread-exclusive writers once the lockstep is gone).
+			// DirtyVariable auto-dispatches inline on the render thread.
+			if (CONST World::FrameSnapshot* snap = m_render_snapshot)
+			{
+				if (m_hp != snap->hud_hp)
+				{
+					m_hp = snap->hud_hp;
+					if (m_hud_model.IsValid())
+						MXRender::UI::UIManager::Get().DirtyVariable(m_hud_model, "hp");
+				}
+				if (m_score != snap->hud_score)
+				{
+					m_score = snap->hud_score;
+					if (m_hud_model.IsValid())
+						MXRender::UI::UIManager::Get().DirtyVariable(m_hud_model, "score");
+				}
+				if (m_wand != snap->hud_wand)
+				{
+					m_wand = snap->hud_wand;
+					if (m_hud_model.IsValid())
+						MXRender::UI::UIManager::Get().DirtyVariable(m_hud_model, "wand");
+				}
+			}
 			// Load-mode render target: the world display pass already cleared
 			// + drew. The dsv MUST be attached (RmlUI's PSO declares
 			// depth_stencil_view - a dsv-less render pass fails pipeline bind
@@ -268,25 +318,27 @@ void NoitaLikeApp::RegisterPlayerPass()
 	},
 	[=](CONST PlayerPassData& data, CommandList* in_cmd)
 	{
-		auto* tf = GetWorld() ? GetWorld()->GetECS().GetComponent<Gameplay::TransformComp>(m_player) : nullptr;
-		if (!tf)
+		// Read the render-minimum snapshot - NEVER reach into live world state
+		// (the lockstep happens-before chain goes away with frame-sync switch).
+		CONST World::FrameSnapshot* snap = m_render_snapshot;
+		if (!snap)
 			return;
 
 		// Rebuild the quad around the player (world units, sprite shader is
 		// solid white).
-		Float32 hx = tf->half_size.x;
-		Float32 hy = tf->half_size.y;
+		Float32 hx = snap->player_half_size.x;
+		Float32 hy = snap->player_half_size.y;
 		if (hx <= 0.0f || hy <= 0.0f) { hx = 1.0f; hy = 1.0f; }
 		PlayerQuadVertex quads[4] = {
-			{ tf->pos.x - hx, tf->pos.y - hy, 0.0f, 0.0f },
-			{ tf->pos.x + hx, tf->pos.y - hy, 1.0f, 0.0f },
-			{ tf->pos.x + hx, tf->pos.y + hy, 1.0f, 1.0f },
-			{ tf->pos.x - hx, tf->pos.y + hy, 0.0f, 1.0f },
+			{ snap->player_pos.x - hx, snap->player_pos.y - hy, 0.0f, 0.0f },
+			{ snap->player_pos.x + hx, snap->player_pos.y - hy, 1.0f, 0.0f },
+			{ snap->player_pos.x + hx, snap->player_pos.y + hy, 1.0f, 1.0f },
+			{ snap->player_pos.x - hx, snap->player_pos.y + hy, 0.0f, 1.0f },
 		};
 		Tool::BufferUtils::Upload(m_player_vb, quads, sizeof(quads));
 
 		PlayerParams params;
-		params.mvp = camera_.GetViewProjectionMatrix();
+		params.mvp = snap->camera_mvp;
 		Tool::BufferUtils::Upload(m_player_params, &params, sizeof(params));
 
 		// Load-mode render target: keep the pixel world already drawn, only
@@ -414,30 +466,69 @@ void NoitaLikeApp::Shoot()
 
 void NoitaLikeApp::SyncHud()
 {
-	auto* hp = GetWorld()->GetECS().GetComponent<Gameplay::HealthComp>(m_player);
-	if (hp)
+	// Fill the render-minimum snapshot (logic thread, tick end). The bound UI
+	// fields (m_hp/m_score/m_wand) are written on the RENDER thread from these
+	// values in the UI pass - the logic thread never touches them anymore.
+	World::FrameSnapshot* snap = world_ ? world_->GetWriteSnapshot() : nullptr;
+	if (!snap)
+		return;
+	snap->frame_tick = GetSimTick();
+
+	auto& ecs = GetWorld()->GetECS();
+
+	// Player quad + camera (render-thread reads these from the snapshot).
+	if (auto* tf = ecs.GetComponent<Gameplay::TransformComp>(m_player))
 	{
-		m_hp = (Int)hp->hp;
-		if (m_hp != m_prev_hp && m_hud_model.IsValid())
-		{
-			MXRender::UI::UIManager::Get().DirtyVariable(m_hud_model, "hp");
-			m_prev_hp = m_hp;
-		}
+		snap->player_pos = tf->pos;
+		snap->player_half_size = tf->half_size;
 	}
-	UInt64 tick = GetSimTick();
-	if ((Int)(tick / 60) != m_prev_score)
-	{
-		m_score = (Int)(tick / 60);
-		if (m_hud_model.IsValid())
-			MXRender::UI::UIManager::Get().DirtyVariable(m_hud_model, "score");
-		m_prev_score = m_score;
-	}
+	snap->camera_mvp = camera_.GetViewProjectionMatrix();
+
+	// HUD values.
+	if (auto* hp = ecs.GetComponent<Gameplay::HealthComp>(m_player))
+		snap->hud_hp = (Int)hp->hp;
+	snap->hud_score = (Int)(GetSimTick() / 60);
+	snap->hud_wand = 0;
+}
+
+void NoitaLikeApp::OnPreRender(Render::FrameContext& ctx)
+{
+	// Render thread: capture the frame's snapshot for the execute lambdas.
+	m_render_snapshot = ctx.snapshot;
+	GameApp::OnPreRender(ctx);
 }
 
 void NoitaLikeApp::OnGameTick()
 {
 	HandleInput();
 	SyncHud();
+
+	// [DX] ENQUEUE_RENDER_COMMAND demo: every 120 ticks (2s) enqueue a command
+	// that executes on the render thread (flush point in RenderThreadMain);
+	// the fence proves consumption on a later tick. Logged ids let you compare
+	// against the logic-thread id printed in OnGameInit.
+	if (++m_dx_demo_counter % 120 == 0)
+	{
+		// Macro path: fire-and-forget statement (tag type is local, name
+		// stringified into the profiling label).
+		ENQUEUE_RENDER_COMMAND(DxDemoCommand)([]()
+		{
+			ASSERT_RENDER_THREAD();
+			std::cout << "[DX-Demo] macro command executed on render thread "
+				<< std::this_thread::get_id() << std::endl;
+		});
+		// Template path: returns a fence for consumption tracking.
+		m_dx_demo_fence = EnqueueRenderCommand<DxDemoFenceTag>("DxDemoFence", []()
+		{
+			ASSERT_RENDER_THREAD();
+		});
+		m_dx_demo_pending = true;
+	}
+	if (m_dx_demo_pending && m_dx_demo_fence.IsComplete())
+	{
+		std::cout << "[DX-Demo] fence complete (render thread consumed the command)" << std::endl;
+		m_dx_demo_pending = false;
+	}
 
 	// RmlUI per-frame update (layout dirty-mark propagation, data binding
 	// refresh, animations). Same call as RmlUIDemo::OnUpdate - without it

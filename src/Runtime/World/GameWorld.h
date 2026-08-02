@@ -3,10 +3,12 @@
 #define _GAME_WORLD_
 
 #include "Core/ConstDefine.h"
+#include "Core/Job/TaskGraph.h"
 #include "World/SimulationState.h"
 #include "World/GameplayEventBus.h"
 #include "World/TerrainEditCommand.h"
 #include "World/PixelCollision.h"
+#include "World/FrameSnapshot.h"
 #include "Gameplay/SystemRegistry.h"
 #include <memory>
 
@@ -50,6 +52,15 @@ public:
 	// Edit sink view of the active simulator (CPU applies, GPU enqueues).
 	ITerrainEditSink* METHOD(GetEditSink)() CONST { return edit_sink_; }
 
+	// ---- Frame snapshot pool (render-minimum world view) ----
+	// The app fills GetWriteSnapshot() at tick end (OnGameTick); the snapshot
+	// pointer is handed to the render thread via FrameContext.snapshot
+	// (GameApp::OnPrepareFrameContext). Depth matches FrameSynchronizer's
+	// in-flight frames so the render thread never reads a reused slot.
+	static constexpr UInt32 kSnapshotDepth = 3;
+	FrameSnapshot* METHOD(GetWriteSnapshot)() { return &snapshots_[snapshot_slot_]; }
+	void METHOD(AdvanceSnapshot)() { snapshot_slot_ = (snapshot_slot_ + 1) % kSnapshotDepth; }
+
 	// Dev-time determinism check: replays the edit log through a CPU world
 	// and compares the solid mask for the first divergence tick.
 	Int METHOD(DebugVerifyDeterminism)();
@@ -58,6 +69,15 @@ protected:
 	void METHOD(SpawnPlayer)();
 	void METHOD(SyncSolidMask)(CONST Vector<EditEvent>& edits);
 	void METHOD(RegisterComponents)();
+
+	// Per-tick task graph steps (sequential tail of the tick). Invoked on
+	// JobSystem workers after the ECS parallel group completes.
+	static void TickFlushEdits(void* arg);
+	static void TickAdvanceState(void* arg);
+	// Audio update runs in the parallel band right AFTER the ECS group (it
+	// reads player positions etc. that systems wrote). No-op when no audio
+	// backend was created.
+	static void TickRunAudio(void* arg);
 
 private:
 #pragma endregion
@@ -73,6 +93,9 @@ protected:
 	UniquePtr<GameplayEventBus> event_bus_;
 	UniquePtr<PixelCollision> collision_;
 	UniquePtr<Gameplay::SystemRegistry> systems_;
+	Core::TaskGraph task_graph_;   // per-tick phase graph (pool reused)
+	FrameSnapshot snapshots_[kSnapshotDepth]{};
+	UInt32 snapshot_slot_ = 0;
 
 private:
 #pragma endregion

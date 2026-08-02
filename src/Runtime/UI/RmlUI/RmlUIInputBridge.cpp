@@ -3,6 +3,7 @@
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Input.h>
 #include "Input/InputSystem.h"
+#include "Render/Core/CommandQueue.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
@@ -13,49 +14,68 @@ void RmlUIInputBridge::SetContext(Rml::Context* context)
 	m_context = context;
 }
 
+// All Process* methods enqueue onto the render thread: Rml::Context is
+// single-threaded and Update()/Render() run there. Bypass mode (no render
+// thread) executes inline - identical semantics. The captured context pointer
+// stays valid: the command queue drains before UIManager::Destroy.
 void RmlUIInputBridge::ProcessMouseMove(Int x, Int y)
 {
 	if (!m_context) return;
-	m_context->ProcessMouseMove(x, y, BuildModifiers());
+	ENQUEUE_RENDER_COMMAND(RmlMouseMove)([ctx = m_context, x, y, mods = BuildModifiers()]()
+	{
+		ctx->ProcessMouseMove(x, y, mods);
+	});
 }
 
 void RmlUIInputBridge::ProcessMouseButton(Int button, bool pressed)
 {
 	if (!m_context) return;
-	int mods = BuildModifiers();
-	if (pressed)
-		m_context->ProcessMouseButtonDown(button, mods);
-	else
-		m_context->ProcessMouseButtonUp(button, mods);
+	ENQUEUE_RENDER_COMMAND(RmlMouseButton)([ctx = m_context, button, pressed, mods = BuildModifiers()]()
+	{
+		if (pressed)
+			ctx->ProcessMouseButtonDown(button, mods);
+		else
+			ctx->ProcessMouseButtonUp(button, mods);
+	});
 }
 
 void RmlUIInputBridge::ProcessMouseScroll(Float32 dx, Float32 dy)
 {
 	if (!m_context) return;
-	m_context->ProcessMouseWheel({ dx, dy }, BuildModifiers());
+	ENQUEUE_RENDER_COMMAND(RmlMouseScroll)([ctx = m_context, dx, dy, mods = BuildModifiers()]()
+	{
+		ctx->ProcessMouseWheel({ dx, dy }, mods);
+	});
 }
 
 void RmlUIInputBridge::ProcessKey(CONST MXRender::Input::Key& key, bool pressed)
 {
 	if (!m_context) return;
-	auto rml_key = static_cast<Rml::Input::KeyIdentifier>(MapKey(key));
-	int mods = BuildModifiers();
-	if (pressed)
-		m_context->ProcessKeyDown(rml_key, mods);
-	else
-		m_context->ProcessKeyUp(rml_key, mods);
+	ENQUEUE_RENDER_COMMAND(RmlKey)([ctx = m_context, rml_key = static_cast<Rml::Input::KeyIdentifier>(MapKey(key)), pressed, mods = BuildModifiers()]()
+	{
+		if (pressed)
+			ctx->ProcessKeyDown(rml_key, mods);
+		else
+			ctx->ProcessKeyUp(rml_key, mods);
+	});
 }
 
 void RmlUIInputBridge::ProcessChar(UInt32 codepoint)
 {
 	if (!m_context) return;
-	m_context->ProcessTextInput(static_cast<Rml::Character>(codepoint));
+	ENQUEUE_RENDER_COMMAND(RmlChar)([ctx = m_context, codepoint]()
+	{
+		ctx->ProcessTextInput(static_cast<Rml::Character>(codepoint));
+	});
 }
 
 void RmlUIInputBridge::ProcessMouseLeave()
 {
 	if (!m_context) return;
-	m_context->ProcessMouseLeave();
+	ENQUEUE_RENDER_COMMAND(RmlMouseLeave)([ctx = m_context]()
+	{
+		ctx->ProcessMouseLeave();
+	});
 }
 
 bool RmlUIInputBridge::IsMouseInteracting() CONST

@@ -19,7 +19,7 @@ Bool BasePanel::OnBegin(Int window_flags)
 
 	ImGui::Begin(name.c_str(), &is_show, window_flags | ImGuiWindowFlags_NoCollapse);
 	//ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,ImVec2(4.0f,2.0f));
-	// --  FPS 移至编辑器窗口级别显示，每个面板不再单独显示
+	// --  FPS 绉昏嚦缂栬緫鍣ㄧ獥鍙ｇ骇鍒樉绀猴紝姣忎釜闈㈡澘涓嶅啀鍗曠嫭鏄剧ず
 	return true;
 }
 

@@ -27,6 +27,9 @@ public:
 	VIRTUAL void OnInitScene() OVERRIDE FINAL;
 	VIRTUAL void OnShutdownScene() OVERRIDE;
 	VIRTUAL void OnUpdate(float dt) OVERRIDE FINAL;
+	// Hand the current tick's snapshot slot to the render thread (FrameContext
+	// carries it to OnPreRender/execute lambdas). NULL for no-world apps.
+	VIRTUAL void METHOD(OnPrepareFrameContext)(Render::FrameContext& ctx) OVERRIDE;
 
 	// Subclass hooks
 	VIRTUAL World::GameWorld* METHOD(CreateGameWorld)() PURE;

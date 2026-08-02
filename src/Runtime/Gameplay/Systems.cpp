@@ -8,36 +8,50 @@
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Gameplay)
 
+SystemAccess MovementSystem::GetAccess() CONST
+{
+	SystemAccess access;
+	access.write_components = { ECS::ComponentTypeID::Get<TransformComp>(), ECS::ComponentTypeID::Get<VelocityComp>() };
+	return access;
+}
+
 void MovementSystem::Run(World::GameWorld& world, Float32 dt)
+{
+	// Sequential fallback (0-worker degrade / single-partition path).
+	RunParallel(world, dt, 0, 1);
+}
+
+void MovementSystem::RunParallel(World::GameWorld& world, Float32 dt,
+	UInt32 partition_index, UInt32 partition_count)
 {
 	auto& ecs = world.GetECS();
 	auto& collision = world.GetCollision();
 	const Float32 kTick = 1.0f / 60.0f;
 
-	ecs.ForEach<TransformComp, VelocityComp>(
-		[&](MXRender::ECS::EntityHandle handle)
+	// Parallel partition over the primary Transform storage: index-sliced,
+	// zero materialization. Component VALUE writes only - no structural
+	// changes (EnTT registry is not thread-safe; JobContext guards this).
+	ecs.ParallelForEach<TransformComp, VelocityComp>(
+		partition_index, partition_count,
+		[&](TransformComp& tf, VelocityComp& vel)
 		{
-			auto* tf = ecs.GetComponent<TransformComp>(handle);
-			auto* vel = ecs.GetComponent<VelocityComp>(handle);
-			if (!tf || !vel)
-				return;
-
 			// Player input is applied by the sample via PlayerComp.speed;
 			// here we just integrate + resolve.
-			glm::vec2 new_pos = tf->pos + vel->vel * dt;
-			glm::vec2 new_vel = vel->vel;
+			glm::vec2 new_pos = tf.pos + vel.vel * dt;
+			glm::vec2 new_vel = vel.vel;
 
 			// AABB resolution against solid mask (players only pass through
-			// non-solid: sand/water are passable in Phase 3).
-			collision.ResolveAABB(new_pos, new_vel, tf->half_size);
+			// non-solid: sand/water are passable in Phase 3). ResolveAABB is
+			// const and lock-free - safe for concurrent partition reads.
+			collision.ResolveAABB(new_pos, new_vel, tf.half_size);
 
 			// Apply gravity (all dynamic entities).
 			new_vel.y -= 18.0f * kTick;
 			if (new_vel.y < -12.0f)
 				new_vel.y = -12.0f;
 
-			tf->pos = new_pos;
-			vel->vel = new_vel;
+			tf.pos = new_pos;
+			vel.vel = new_vel;
 		});
 }
 

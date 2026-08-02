@@ -9,6 +9,8 @@
 #include "ECS/ComponentTypeID.h"
 #include "Core/ResourceRegistry.h"
 #include <entt/entt.hpp>
+#include <tuple>
+#include <utility>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(ECS)
@@ -44,6 +46,15 @@ public:
 
 	template<typename T>
 	void METHOD(RegisterComponentType)();
+
+	// Typed parallel iteration over the primary storage (First) sliced by
+	// index - zero materialization, cache-affine partitions. Rest components
+	// are filtered per entity (view semantics). Callable from JobSystem
+	// workers: NO structural changes may happen inside (EnTT registry is not
+	// thread-safe for create/destroy/emplace/remove - see JobContext guards).
+	template<typename First, typename... Rest>
+	void ParallelForEach(UInt32 partition_index, UInt32 partition_count,
+		CONST std::function<void(First&, Rest&...)>& callback);
 
 protected:
 	struct ComponentOps
@@ -216,6 +227,50 @@ inline void EnntECSSystem::GarbageCollect()
 	for (entt::entity e : m_deferred_destroy)
 		if (m_registry.valid(e)) m_registry.destroy(e);
 	m_deferred_destroy.clear();
+}
+
+template<typename First, typename... Rest>
+inline void EnntECSSystem::ParallelForEach(UInt32 partition_index, UInt32 partition_count,
+	CONST std::function<void(First&, Rest&...)>& callback)
+{
+	if (partition_count == 0 || !callback)
+		return;
+
+	// Primary storage: packed entity array + component array are index-aligned
+	// (EnTT 3.13 basic_storage). Slice the entity array.
+	//
+	// IMPORTANT: cache storage references OUTSIDE the loop. EnTT's registry
+	// accessors (assure -> dense_map lookup) are ~23us/call in this build -
+	// per-entity registry.get/all_of would make the loop ~100x slower. Direct
+	// storage access is the whole point of the typed path.
+	auto& main_storage = m_registry.storage<First>();
+	const std::size_t total = main_storage.size();
+	if (total == 0)
+		return;
+
+	const std::size_t begin = total * partition_index / partition_count;
+	const std::size_t end = total * (partition_index + 1) / partition_count;
+	const entt::entity* entities = main_storage.data();
+
+	if constexpr (sizeof...(Rest) == 0)
+	{
+		for (std::size_t i = begin; i < end; ++i)
+			callback(main_storage.get(entities[i]));
+		return;
+	}
+
+	// Rest storages cached once per partition; per-entity access is a direct
+	// sparse lookup (no registry round-trip).
+	auto rest_storages = std::make_tuple(&m_registry.storage<std::remove_const_t<Rest>>()...);
+	std::apply([&](auto*... rs) {
+		for (std::size_t i = begin; i < end; ++i)
+		{
+			const entt::entity e = entities[i];
+			if (!(rs->contains(e) && ...))
+				continue;  // view semantics: entity must have every component
+			callback(main_storage.get(e), rs->get(e)...);
+		}
+	}, rest_storages);
 }
 
 MYRENDERER_END_NAMESPACE  // Ennt

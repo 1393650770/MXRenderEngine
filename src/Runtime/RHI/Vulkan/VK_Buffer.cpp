@@ -366,7 +366,7 @@ void VK_StagingBufferManager::ProcessPendingFree(Bool is_immediate, Bool is_free
 				for (Int buffer_index = 0; buffer_index < pending_item_per_fence.buffer.size(); buffer_index++)
 				{
 					VK_Buffer* buffer = pending_item_per_fence.buffer[buffer_index];
-					free_buffers.push_back({ buffer, g_frame_number_render_thread });
+					free_buffers.push_back({ buffer, g_frame_number_render_thread.load() });
 				}
 				pending_item_per_fence.buffer.clear();
 				pending_item.pending_items.erase(pending_item.pending_items.begin() + fence_index);
@@ -379,7 +379,7 @@ void VK_StagingBufferManager::ProcessPendingFree(Bool is_immediate, Bool is_free
 	{
 		for (Int i = 0; i < free_buffers.size(); i++)
 		{
-			if (is_immediate ||free_buffers[i].frame_num + VK_NUM_FRAMES_TO_WAIT_BEFORE_RELEASING_TO_OS < g_frame_number_render_thread)
+			if (is_immediate ||free_buffers[i].frame_num + VK_NUM_FRAMES_TO_WAIT_BEFORE_RELEASING_TO_OS < g_frame_number_render_thread.load())
 			{
 				free_buffers[i].buffer->Destroy();
 				delete free_buffers[i].buffer;
@@ -400,7 +400,7 @@ void VK_StagingBufferManager::ReleaseStagingBuffer(VK_Buffer*& buffer, VK_Comman
 	}
 	else
 	{
-		free_buffers.push_back({ buffer, g_frame_number_render_thread });
+		free_buffers.push_back({ buffer, g_frame_number_render_thread.load() });
 	}
 	buffer = nullptr;
 }

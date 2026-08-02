@@ -8,11 +8,13 @@
 #include "UI/UIHandleTypes.h"
 #include "ECS/ECSSystem.h"
 #include "World/PixelWorldRenderer.h"
+#include "Render/Core/CommandQueue.h"
 #include <atomic>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(World)
 class GameWorld;
+struct FrameSnapshot;
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE
 
@@ -31,6 +33,7 @@ public:
 	VIRTUAL World::GameWorld* METHOD(CreateGameWorld)() OVERRIDE;
 	VIRTUAL void METHOD(OnGameInit)() OVERRIDE;
 	VIRTUAL void METHOD(OnGameTick)() OVERRIDE;
+	VIRTUAL void METHOD(OnPreRender)(Render::FrameContext& ctx) OVERRIDE;
 	VIRTUAL void METHOD(OnShutdownScene)() OVERRIDE;
 
 	// ---- UI_BIND fields (public, scanned by MetaParser) ----
@@ -65,8 +68,15 @@ protected:
 	std::atomic<UInt32> m_pending_ticks{ 0 };
 	UInt32 m_frame_count = 0;
 	Bool m_prev_fire = false;
-	Int m_prev_hp = -1;
-	Int m_prev_score = -1;
+	// Current frame's snapshot (set on the RENDER thread in OnPreRender from
+	// FrameContext; execute lambdas read it - never reach into live world).
+	CONST World::FrameSnapshot* m_render_snapshot = nullptr;
+
+	// DX demo (ENQUEUE_RENDER_COMMAND): every 120 ticks enqueue a render-thread
+	// command and verify the fence completes on a later tick.
+	MXRender::Render::RenderCommandFence m_dx_demo_fence{};
+	UInt32 m_dx_demo_counter = 0;
+	Bool m_dx_demo_pending = false;
 
 	// Player sprite (quad drawn on top of the pixel world).
 	RHI::Buffer* m_player_vb = nullptr;

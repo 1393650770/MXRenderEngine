@@ -55,6 +55,11 @@ namespace
 	// memcpy overflows the buffer -> heap corruption (0xC0000374).
 	// Layout: {UInt32 count; UInt32 pad; EditEvent evts[kEventBufferCapacity]}.
 	constexpr UInt32 kEventBufferBytes = (2 * sizeof(UInt32)) + kEventBufferCapacity * sizeof(EditEvent);
+
+	// Max GPU sim chain steps per render frame (see TickFrame chain gate).
+	// Logic-leads-render can pile up 4 catch-up ticks; uncapped chains would
+	// spike the GPU with 24+ dispatches in one frame.
+	constexpr UInt32 kMaxChainTicks = 2;
 }
 
 GpuPixelWorld::GpuPixelWorld() MYDEFAULT;
@@ -285,6 +290,11 @@ void GpuPixelWorld::TickFrame(CONST SimFrameContext& ctx)
 	UInt32 chain_ticks = ctx.pending_ticks;
 	if (chain_ticks == 0 && event_queue_.last_flushed_ > 0)
 		chain_ticks = 1;
+	// Cap the chain: in logic-leads-render mode the logic thread can be up to
+	// 4 ticks ahead (FixedTickClock catch-up) - an uncapped chain would
+	// dispatch 24+ sim steps in one frame and spike the GPU. Remainder ticks
+	// carry over via pending_ticks (they are re-counted next frame).
+	chain_ticks = (std::min)(chain_ticks, (UInt32)kMaxChainTicks);
 
 	UploadParams(ctx.cmd, ctx.frame_index);
 

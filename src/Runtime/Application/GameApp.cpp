@@ -1,5 +1,6 @@
 #include "Application/GameApp.h"
 #include "World/GameWorld.h"
+#include "Render/Core/RenderFrameData.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Application)
@@ -33,6 +34,13 @@ void GameApp::OnUpdate(float dt)
 		++sim_tick_;
 		OnGameTick();
 	}
+}
+
+void GameApp::OnPrepareFrameContext(Render::FrameContext& ctx)
+{
+	// Current snapshot slot (already rotated by Tick; the app filled it in
+	// OnGameTick). The render thread reads this pointer only.
+	ctx.snapshot = world_ ? world_->GetWriteSnapshot() : nullptr;
 }
 
 MYRENDERER_END_NAMESPACE  // Application

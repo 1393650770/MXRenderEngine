@@ -122,6 +122,12 @@
                                    	std::cout<< String(LOG)+"\n"+boost::stacktrace::to_string(stack_trace) <<std::endl; \
                                 }
 #endif
+// Positive-semantics assertions (UE ENSURE naming): fire when the condition is
+// FALSE - complementary to the inverted CHECK family. New code should use
+// ENSURE; the CHECK family keeps its inverted semantics for existing callers.
+#define ENSURE(Condition, ...) CHECK_WITH_LOG(!(Condition), __VA_ARGS__)
+#define ENSURE_WITH_LOG(Condition, ...) CHECK_WITH_LOG(!(Condition), __VA_ARGS__)
+
 #define VIRTUAL      virtual
 #define CONST        const
 #define MYDEFAULT      =default

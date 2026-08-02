@@ -611,7 +611,7 @@ VK_PipelineState* VK_PipelineStateManager::GetPipelineState(CONST RenderGraphiPi
 	{
 		// Verify desc matches (hash=0 bug could cause false cache hits)
 		if (it->second->desc == in_desc) {
-			it->second->last_used_frame = g_frame_number_render_thread;
+			it->second->last_used_frame = g_frame_number_render_thread.load();
 			std::cout << "use cache PipelineState:" << in_desc.shaders[ENUM_SHADER_STAGE::Shader_Compute]->GetDesc().shader_name << std::endl;
 			return it->second;
 		}
@@ -635,7 +635,7 @@ VK_ComputePipelineState* VK_PipelineStateManager::GetComputePipelineState(CONST 
         auto it = compute_pipeline_states_map.find(hash);
         if (it != compute_pipeline_states_map.end())
         {
-                it->second->last_used_frame = g_frame_number_render_thread;
+                it->second->last_used_frame = g_frame_number_render_thread.load();
                 return it->second;
         }
         VK_ComputePipelineState* pipeline_state = new VK_ComputePipelineState(device, in_desc, pipeline_cache);

@@ -4,17 +4,24 @@
 
 #include "Core/ConstDefine.h"
 #include "Gameplay/ISystem.h"
+#include "Gameplay/IParallelSystem.h"
 #include "Gameplay/Components.h"
+#include "ECS/ComponentTypeID.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Gameplay)
 
 // Integrates Transform + Velocity, resolves against the world solid mask.
 // Player entities get WASD input from the sample via the shared input state.
-class MovementSystem : public ISystem
+// Parallel: partitions over the Transform storage; reads the solid mask via
+// const-only PixelCollision calls (SetSolid stays on the logic thread).
+class MovementSystem : public IParallelSystem
 {
 public:
+	VIRTUAL SystemAccess METHOD(GetAccess)() CONST OVERRIDE;
 	VIRTUAL void METHOD(Run)(World::GameWorld& world, Float32 dt) OVERRIDE;
+	VIRTUAL void METHOD(RunParallel)(World::GameWorld& world, Float32 dt,
+		UInt32 partition_index, UInt32 partition_count) OVERRIDE;
 };
 
 // Decrements projectile lifetime, raycasts against solid terrain, and on hit

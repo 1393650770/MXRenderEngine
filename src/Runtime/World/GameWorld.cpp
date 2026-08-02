@@ -6,10 +6,23 @@
 #include "World/MaterialRegistry.h"
 #include "Gameplay/Components.h"
 #include "ECS/ECSManager.h"
+#include "Audio/AudioManager.h"
+#include "Core/Job/JobSystem.h"
 #include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(World)
+
+namespace
+{
+	// Payload for the per-tick task graph steps; lives on the logic thread's
+	// stack for the duration of Tick() (Execute blocks until completion).
+	struct TickArgs
+	{
+		GameWorld* world = nullptr;
+		Float32 dt = 0.0f;
+	};
+}
 
 GameWorld::GameWorld(UInt32 seed)
 	: edit_queue_(std::make_unique<TerrainEditQueue>())
@@ -29,6 +42,9 @@ GameWorld::GameWorld(UInt32 seed)
 	CHECK_WITH_LOG(simulator_ == nullptr, "GameWorld: simulator factory returned null")
 	edit_sink_ = dynamic_cast<ITerrainEditSink*>(simulator_);
 	CHECK_WITH_LOG(edit_sink_ == nullptr, "GameWorld: simulator is not an ITerrainEditSink")
+
+	// Composition root owns the JobSystem lifecycle (facade singleton).
+	Core::JobSystem::Initialize();
 }
 
 GameWorld::~GameWorld()
@@ -39,6 +55,7 @@ GameWorld::~GameWorld()
 	// - owned here, must be released before the ECS singleton dies.
 	delete simulator_;
 	simulator_ = nullptr;
+	Core::JobSystem::Shutdown();
 	ECS::ECSManager::Destroy();
 }
 
@@ -78,20 +95,59 @@ void GameWorld::Tick()
 {
 	Float32 dt = 1.0f / 60.0f;
 
-	// 1. ECS systems (movement, projectiles, camera follow).
-	systems_->RunAll(*this, dt);
+	// Per-tick task graph. RunAllParallel expands the ECS systems into the
+	// graph: parallel systems run as partitioned task groups (concurrently on
+	// JobSystem workers), sequential systems run after the whole group. The
+	// graph is rebuilt every tick - TaskGraph::Reset() reuses its node pool,
+	// so the hot path stays allocation-free.
+	TickArgs args{ this, dt };
+	task_graph_.Reset();
+	Core::JobTask* t_systems = systems_->RunAllParallel(*this, dt, task_graph_);
+	// Audio and edits both depend on the ECS group (they read its output) and
+	// run concurrently with each other.
+	Core::JobTask* t_audio = task_graph_.AddTask("Tick.Audio", &TickRunAudio, &args);
+	Core::JobTask* t_edits = task_graph_.AddTask("Tick.Edits", &TickFlushEdits, &args);
+	Core::JobTask* t_state = task_graph_.AddTask("Tick.State", &TickAdvanceState, &args);
+	task_graph_.AddDependency(t_audio, t_systems);
+	task_graph_.AddDependency(t_edits, t_systems);
+	task_graph_.AddDependency(t_state, t_edits);
+	task_graph_.AddDependency(t_state, t_audio);
+	task_graph_.Execute(Core::JobSystem::Get());
 
+	// Rotate the snapshot slot at tick end: the app fills the new slot in
+	// OnGameTick (right after Tick returns), and the same slot is handed to
+	// the render thread via FrameContext.snapshot this frame.
+	AdvanceSnapshot();
+}
+
+void GameWorld::TickRunAudio(void* arg)
+{
+	TickArgs* a = static_cast<TickArgs*>(arg);
+	// No backend created (most samples) -> no-op. Runs on a JobSystem worker;
+	// miniaudio's engine update is thread-safe for a single caller thread.
+	if (Audio::AudioManager::IsCreated())
+		Audio::AudioManager::Get().Update(a->dt);
+}
+
+void GameWorld::TickFlushEdits(void* arg)
+{
+	TickArgs* a = static_cast<TickArgs*>(arg);
 	// 2. Flush terrain edits into the simulator + CPU solid mask mirror.
-	if (edit_queue_->HasPending())
+	if (a->world->edit_queue_->HasPending())
 	{
 		Vector<EditEvent> flushed;
-		edit_queue_->FlushTo(*edit_sink_, &flushed);
-		SyncSolidMask(flushed);
+		a->world->edit_queue_->FlushTo(*a->world->edit_sink_, &flushed);
+		a->world->SyncSolidMask(flushed);
 	}
+}
 
-	// 3. Advance simulation state.
-	++sim_state_.tick;
-	sim_state_.rng.Next();
+void GameWorld::TickAdvanceState(void* arg)
+{
+	TickArgs* a = static_cast<TickArgs*>(arg);
+	// 3. Advance simulation state (RNG stays on the sequential tail so the
+	// consumption order is deterministic regardless of task scheduling).
+	++a->world->sim_state_.tick;
+	a->world->sim_state_.rng.Next();
 }
 
 void GameWorld::Reset(UInt32 seed)

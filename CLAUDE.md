@@ -65,17 +65,47 @@ Editor.exe  ──depends──>  Runtime.lib  ──includes──>  ThirdParty
 - Pre-build (`CompileResource` target) runs automatically: ① MetaParser (libclang + mustache) generates reflection/serializer code into `src/_Generated/` ② `glslangValidator` compiles `resource/Shader/**` to `.spv` ③ `flatc` generates flatbuffers C++
 - Post-build `MoveResource` copies `.spv` (flattened!), textures, and dlls into the output dir
 - Key dependencies: vulkansdk, glfw, glm, imgui (docking), nlohmann_json, flatbuffers, boost, assimp
-- C++20, GBK encoding for .cpp/.h files
+- C++20, UTF-8 (no BOM) encoding for .cpp/.h files
 
 ## Code Conventions
 
-- Macros: `MYRENDERER_BEGIN_CLASS`, `MYRENDERER_END_CLASS`, `VIRTUAL`, `METHOD()`, `OVERRIDE`, `CONST`, `MYDEFAULT`
+- **Dual-track style (规范 V2)**:
+  - Classes that need reflection output (serialization / network replication / UI binding / runtime type name) → `MYRENDERER_BEGIN_CLASS(Name)` + field `META(...)` (reflection is opt-in; MetaParser silently skips unmarked classes)
+  - Everything else (engine classes, pass data structs, Editor commands, pure logic) → modern C++ direct: `class X { virtual ~X() = default; void Run() override; }`. Class-internal methods/fields are ALWAYS modern-style, even in reflected classes.
+  - Precedent: `src/Editor/UI/RenderGraphEditor/Commands/` is fully modern-style.
+- **DEPRECATED (new code must not use): `VIRTUAL` / `METHOD()` / `OVERRIDE` / `CONST` / `MYDEFAULT` / `MYDELETE` / `PURE`** — they are keyword synonyms; `__cdecl` (x64 default) adds nothing. ~3000 legacy sites stay untouched (migrate on touch). Known debt: METHOD/VIRTUAL legacy macros.
+- **Assertions**: new code uses positive-semantics `ENSURE(cond, ...)` (fires when cond is FALSE). The `CHECK` family keeps its INVERTED semantics for existing callers — `CHECK(flag)` fires when flag is TRUE.
 - Type aliases: `String`, `Vector`, `Map`, `Bool`, `UInt32`, `Int`, etc. (from ConstDefine.h)
-- Namespaces: `MXRender::Render`, `MXRender::RHI`, `MXRender::UI`, `MXRender::RHI::Vulkan`
+- Namespaces: `MXRender::Render`, `MXRender::RHI`, `MXRender::UI`, `MXRender::RHI::Vulkan`, `MXRender::Core` (Job), `MXRender::Gameplay`, `MXRender::World`
 - `#pragma region METHOD` / `#pragma region MEMBER` for class organization
-- GBK encoding for all .cpp/.h files (keep comments ASCII to avoid transcoding issues)
+- **UTF-8 (no BOM) encoding for all .cpp/.h files**; Chinese comments allowed (the old "GBK / keep comments ASCII" rule was wrong — the repo is ~99% UTF-8)
 - **`CHECK(flag)` / `CHECK_WITH_LOG(flag, msg)` fire when the condition is TRUE** — inverted vs standard assert (e.g. `CHECK_WITH_LOG(vkCreate...(...) != VK_SUCCESS, "...")`)
 - Detailed conventions (namespace layout, macro system, file templates) live in the `myrenderer-conventions` skill
+
+## Cross-Thread Command Channel (ENQUEUE_RENDER_COMMAND)
+
+Logic thread → render thread one-shot operations (`src/Runtime/Render/Core/CommandQueue.h`, header-only):
+
+```cpp
+ENQUEUE_RENDER_COMMAND(CreateMesh)([p = std::move(payload)]{ ... });   // fire-and-forget (statement-only)
+struct MyCmdTag {};                                                    // fence variant needs a tag type
+RenderCommandFence fence = EnqueueRenderCommand<MyCmdTag>("MyCmd", [=]{ ... });
+```
+
+- **Snapshot vs command rule**: data the render thread reads EVERY frame (camera/player params/HUD) → FrameContext snapshot; one-shot lifecycle ops (create/destroy resource, one-time upload, editor action) → command queue. >5-10 commands/frame = design error.
+- **Fence semantics**: `IsComplete()` proves CPU execution on the render thread only, NOT GPU completion. The only safe GPU visibility model is "fence complete + next frame RDG reference". Never rewrite captured mapped memory right after Wait().
+- **Deadlock rule**: `fence.Wait()` only AFTER `SignalFrameReady()`. Command bodies must never call FrameSynchronizer logic APIs or `Begin()/End()/SetBypass()/SwapCommandLists()`.
+- **Record-type commands** (bodies calling `RHIGetWriteCommandList()`) are UB in bypass mode (no render thread) — assert via `RenderCommandFlags::Record`.
+- Thread assertions: `ASSERT_RENDER_THREAD()` / `ASSERT_LOGIC_THREAD()`.
+- Flush point: `RenderFrameSync.cpp::RenderThreadMain` after `Begin()`, before `OnPreRender`. Shutdown sequence: join → `Drain()` (before `OnShutdown_Render`) → `Shutdown()`.
+
+## JobSystem & TaskGraph (`src/Runtime/Core/Job/`)
+
+- Worker pool + dependency DAG for the logical tick; 0-worker mode = fully sequential (Android/Web). Lifecycle owned by GameWorld (Initialize in ctor, Shutdown in dtor).
+- `Execute()` is called by the logic thread which PARTICIPATES until completion. Workers NEVER block on graph completion (no WaitAll inside task bodies — that starves).
+- Task args may be heap-owned: pass an `arg_dtor` to `TaskGraph::AddTask` (JobSystem calls it after fn).
+- Per-tick graphs are rebuilt via `TaskGraph::Reset()` (node pool keeps pointers stable — std::deque, NOT std::vector).
+- Parallel ECS iteration (`EnntECSSystem::ParallelForEach`): cache storage references OUTSIDE the entity loop — EnTT's `registry.get/all_of` (assure → dense_map) cost ~23µs/call in this build.
 
 ## Samples (src/Sample/)
 

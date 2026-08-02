@@ -9,6 +9,9 @@ MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)
 class Texture;
 MYRENDERER_END_NAMESPACE
+MYRENDERER_BEGIN_NAMESPACE(World)
+struct FrameSnapshot;   // defined in World/FrameSnapshot.h (pointer-only here)
+MYRENDERER_END_NAMESPACE
 
 MYRENDERER_BEGIN_NAMESPACE(Render)
 
@@ -35,6 +38,10 @@ public:
 	// ImGui draw data: Logic thread generates, Render thread records & deletes
 	// ImGui draw data (void* to avoid Runtime depending on imgui.h)
 	void* draw_data = nullptr;
+	// Render-minimum world snapshot (World/FrameSnapshot.h). Filled by the
+	// logic thread at tick end; read-only on the render thread. NULL when the
+	// app has no GameWorld (plain render samples).
+	World::FrameSnapshot* snapshot = nullptr;
 MYRENDERER_END_STRUCT
 
 MYRENDERER_END_NAMESPACE

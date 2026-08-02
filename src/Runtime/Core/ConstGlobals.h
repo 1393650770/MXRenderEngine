@@ -4,8 +4,12 @@
 #define _CONSTGLOBALS_
 
 #include "ConstDefine.h"
+#include <atomic>
 
-extern CORE_API UInt64 g_frame_number_render_thread;
+// Atomic: written by the logic thread (Window), read by the render thread
+// (RHIRenderEnd -> deferred-release age checks). The lockstep happens-before
+// chain disappears once the frame sync switches to lead-by-1.
+extern CORE_API std::atomic<UInt64> g_frame_number_render_thread;
 extern CORE_API CONST UInt64 g_max_frame_number;
 
 //  线程模式配置
