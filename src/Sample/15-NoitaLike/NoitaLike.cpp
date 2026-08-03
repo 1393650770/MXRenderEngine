@@ -38,7 +38,10 @@ namespace MXRender { namespace UI { namespace Widget {
 #include "ECS/ECSManager.h"
 #include "Gameplay/Components.h"
 #include "Gameplay/Systems.h"
+#include "Gameplay/TrailUpdateSystem.h"
 #include "Gameplay/SystemRegistry.h"
+#include "Render/LineRenderer/LineRendererManager.h"
+#include "Render/LineRenderer/LineRendererPass.h"
 #include "UI/UIManager.h"
 #include "UI/RmlUI/RmlUISystem.h"
 #include "UI/UIRenderPass.h"
@@ -84,6 +87,10 @@ World::GameWorld* NoitaLikeApp::CreateGameWorld()
 	world->GetSystems().Register("Movement", std::make_unique<Gameplay::MovementSystem>());
 	world->GetSystems().Register("Projectile", std::make_unique<Gameplay::ProjectileSystem>());
 	world->GetSystems().Register("CameraFollow", std::make_unique<Gameplay::CameraFollowSystem>());
+	// Trail update: reads Transform (conflicts with Movement's Transform
+	// write -> auto-demoted to sequential, runs after Projectile so the
+	// trail tip equals the projectile's current position).
+	world->GetSystems().Register("TrailUpdate", std::make_unique<Gameplay::TrailUpdateSystem>());
 	return world;
 }
 
@@ -126,14 +133,24 @@ void NoitaLikeApp::OnGameInit()
 			auto* tf = ecs.AddComponent<Gameplay::TransformComp>(e);
 			auto* vel = ecs.AddComponent<Gameplay::VelocityComp>(e);
 			tf->pos = glm::vec2((Float32)(i % 256), (Float32)(i / 256) * 0.5f);
-			vel->vel = glm::vec2((Float32)((i % 7) - 3) * 0.5f, (Float32)((i % 5) - 2) * 0.5f);
+			// NOTE: cast to Int BEFORE the subtraction - (i % 7) is UInt32 and
+			// underflows for i%7 < 3, producing vel ~2.1e9 (entities flew
+			// 3.6e7 units/tick to garbage positions).
+			vel->vel = glm::vec2((Float32)((Int)(i % 7) - 3) * 0.5f, (Float32)((Int)(i % 5) - 2) * 0.5f);
 		}
 		std::cout << "[Stress] spawned " << kStressCount << " entities, workers="
 			<< Core::JobSystem::Get().GetWorkerCount() << std::endl;
 	}
 
+	// Line/trail rendering facade (created before any trail component).
+	Render::LineRendererManager::Create();
+	world_->GetECS().RegisterComponent<Render::LineRendererComponent>();   // 必须先于 AddComponent
+
 	// World rendering: sim pass (GPU simulation) + display pass + player.
 	RegisterWorldPasses();
+
+	// Trails overlay the world between player and UI (RDG order = registration).
+	Render::RegisterLinePass(&graph, GetBackBufferResource(), RHIGetImmediateCommandList());
 
 	// UI pass is registered LAST - the RDG timeline follows registration
 	// order, so the UI must be the final writer of the backbuffer. Its
@@ -398,9 +415,10 @@ void NoitaLikeApp::SpawnPlayer()
 	ecs.AddComponent<Gameplay::PlayerComp>(m_player);
 	ecs.AddComponent<Gameplay::HealthComp>(m_player);
 	ecs.AddComponent<Gameplay::WandComp>(m_player);
-	// Player spawns in the middle of the world (visible in the fixed
-	// whole-world camera view).
-	ecs.GetComponent<Gameplay::TransformComp>(m_player)->pos = glm::vec2(128.0f, 96.0f);
+	// Player spawns standing on the stone floor (stone top is y=24; half-size
+	// 1.2 -> pos.y 25.5 rests on it). Spawning mid-air (y=96) made the player
+	// slowly sink for ~6s under gravity before touching down.
+	ecs.GetComponent<Gameplay::TransformComp>(m_player)->pos = glm::vec2(128.0f, 25.5f);
 	ecs.GetComponent<Gameplay::TransformComp>(m_player)->half_size = glm::vec2(1.2f, 1.2f);
 }
 
@@ -461,6 +479,15 @@ void NoitaLikeApp::Shoot()
 	ptf->pos = tf->pos + dir * 1.0f;
 	ptf->half_size = glm::vec2(0.25f, 0.25f);
 	pvel->vel = dir * 12.0f;
+
+	// Trail component: Unity LineRenderer-style, follows the entity lifecycle
+	// (TrailUpdateSystem appends its position every tick; the trail vanishes
+	// with the entity).
+	auto* lr = ecs.AddComponent<Render::LineRendererComponent>(proj);
+	lr->SetWidth(0.35f, 0.15f);    // 头粗尾细（世界单位）
+	lr->SetColor(glm::vec4(1.0f, 0.85f, 0.4f, 1.0f), glm::vec4(1.0f, 0.35f, 0.15f, 1.0f));  // 橙→红
+	lr->AddPoint(ptf->pos);        // 初始点
+
 	std::cout << "[NoitaLike] shot at (" << aim_world.x << ", " << aim_world.y << ")" << std::endl;
 }
 
@@ -495,6 +522,10 @@ void NoitaLikeApp::OnPreRender(Render::FrameContext& ctx)
 {
 	// Render thread: capture the frame's snapshot for the execute lambdas.
 	m_render_snapshot = ctx.snapshot;
+	// Inject the frame number + camera MVP for the line pass (execute lambdas
+	// cannot see the FrameContext - this is the single render-side entry).
+	Render::LineRendererManager::Get().SetRenderFrame(ctx.frame_number,
+		ctx.snapshot ? ctx.snapshot->camera_mvp : glm::mat4(1.0f));
 	GameApp::OnPreRender(ctx);
 }
 
@@ -502,6 +533,22 @@ void NoitaLikeApp::OnGameTick()
 {
 	HandleInput();
 	SyncHud();
+
+	// [Player-probe] temporary player telemetry.
+	{
+		static UInt32 s_probe = 0;
+		if (++s_probe % 60 == 0)
+		{
+			auto& ecs = world_->GetECS();
+			auto* tf = ecs.GetComponent<Gameplay::TransformComp>(m_player);
+			auto* vel = ecs.GetComponent<Gameplay::VelocityComp>(m_player);
+			if (tf && vel)
+				std::cout << "[Player] pos=(" << tf->pos.x << "," << tf->pos.y
+					<< ") vel=(" << vel->vel.x << "," << vel->vel.y
+					<< ") solid_below=" << world_->GetCollision().IsSolid((Int)tf->pos.x, (Int)(tf->pos.y - tf->half_size.y))
+					<< " solid_here=" << world_->GetCollision().IsSolid((Int)tf->pos.x, (Int)tf->pos.y) << std::endl;
+		}
+	}
 
 	// [DX] ENQUEUE_RENDER_COMMAND demo: every 120 ticks (2s) enqueue a command
 	// that executes on the render thread (flush point in RenderThreadMain);
@@ -553,6 +600,8 @@ void NoitaLikeApp::OnShutdownScene()
 	m_world_renderer.Shutdown();
 	MXRender::UI::UIManager::Destroy();
 	GameApp::OnShutdownScene();
+	// Last: world (entities/components) died above; no collector runs after.
+	Render::LineRendererManager::Destroy();
 }
 
 int main()

@@ -78,6 +78,12 @@ protected:
 	// reads player positions etc. that systems wrote). No-op when no audio
 	// backend was created.
 	static void TickRunAudio(void* arg);
+	// Trail collection (tick-graph tail): value-copies every live
+	// LineRendererComponent into LineRendererManager's render slot for this
+	// frame. Runs after ALL systems + GarbageCollect, so the collected set is
+	// exactly "this tick's surviving entities" (dead entities' trails vanish
+	// this tick - component semantics, no fade-out).
+	static void TickSyncTrails(void* arg);
 
 private:
 #pragma endregion

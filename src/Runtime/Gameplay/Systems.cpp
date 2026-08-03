@@ -4,6 +4,7 @@
 #include "World/TerrainEditCommand.h"
 #include "ECS/ECSManager.h"
 #include <algorithm>
+#include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Gameplay)

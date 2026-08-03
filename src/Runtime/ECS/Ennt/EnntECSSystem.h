@@ -255,7 +255,16 @@ inline void EnntECSSystem::ParallelForEach(UInt32 partition_index, UInt32 partit
 	if constexpr (sizeof...(Rest) == 0)
 	{
 		for (std::size_t i = begin; i < end; ++i)
-			callback(main_storage.get(entities[i]));
+		{
+			const entt::entity e = entities[i];
+			// EnTT 3.13 storage uses in_place_delete (tombstones): the packed
+			// entity array can contain destroyed entities. get() on a
+			// tombstone returns garbage (observed: 0x88888888 positions
+			// polluting MovementSystem). Skip invalid entities.
+			if (!m_registry.valid(e))
+				continue;
+			callback(main_storage.get(e));
+		}
 		return;
 	}
 
@@ -266,6 +275,8 @@ inline void EnntECSSystem::ParallelForEach(UInt32 partition_index, UInt32 partit
 		for (std::size_t i = begin; i < end; ++i)
 		{
 			const entt::entity e = entities[i];
+			if (!m_registry.valid(e))
+				continue;  // skip tombstones (in_place_delete packed array)
 			if (!(rs->contains(e) && ...))
 				continue;  // view semantics: entity must have every component
 			callback(main_storage.get(e), rs->get(e)...);

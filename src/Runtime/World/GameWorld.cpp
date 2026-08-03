@@ -7,7 +7,9 @@
 #include "Gameplay/Components.h"
 #include "ECS/ECSManager.h"
 #include "Audio/AudioManager.h"
+#include "Render/LineRenderer/LineRendererManager.h"
 #include "Core/Job/JobSystem.h"
+#include "Core/ConstGlobals.h"
 #include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -112,6 +114,11 @@ void GameWorld::Tick()
 	task_graph_.AddDependency(t_edits, t_systems);
 	task_graph_.AddDependency(t_state, t_edits);
 	task_graph_.AddDependency(t_state, t_audio);
+	// Trail collection last: after state (which depends on all systems +
+	// GarbageCollect inside the sequential tail) - the collected set is the
+	// tick's surviving entities.
+	Core::JobTask* t_trails = task_graph_.AddTask("Tick.Trails", &TickSyncTrails, &args);
+	task_graph_.AddDependency(t_trails, t_state);
 	task_graph_.Execute(Core::JobSystem::Get());
 
 	// Rotate the snapshot slot at tick end: the app fills the new slot in
@@ -127,6 +134,26 @@ void GameWorld::TickRunAudio(void* arg)
 	// miniaudio's engine update is thread-safe for a single caller thread.
 	if (Audio::AudioManager::IsCreated())
 		Audio::AudioManager::Get().Update(a->dt);
+}
+
+void GameWorld::TickSyncTrails(void* arg)
+{
+	TickArgs* a = static_cast<TickArgs*>(arg);
+	Render::LineRendererManager& mgr = Render::LineRendererManager::Get();
+	const UInt64 frame = g_frame_number_render_thread.load();
+	Render::LineFrameState* out = mgr.GetWriteStates(frame);
+	UInt32 count = 0;
+	// Reuse the typed iteration path (single partition = sequential collect).
+	// Value-copy, never component pointers: components die with entities
+	// (GarbageCollect) - pointers would dangle in the render thread.
+	a->world->GetECS().ParallelForEach<Render::LineRendererComponent>(
+		0, 1,
+		[&](Render::LineRendererComponent& c)
+		{
+			if (count < mgr.GetWriteCapacity())
+				out[count++] = Render::MakeLineFrameState(c);
+		});
+	mgr.SetWriteCount(frame, count);
 }
 
 void GameWorld::TickFlushEdits(void* arg)
