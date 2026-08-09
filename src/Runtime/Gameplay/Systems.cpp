@@ -38,15 +38,28 @@ void MovementSystem::RunParallel(World::GameWorld& world, Float32 dt,
 		{
 			// Player input is applied by the sample via PlayerComp.speed;
 			// here we just integrate + resolve.
-			glm::vec2 new_pos = tf.pos + vel.vel * dt;
-			glm::vec2 new_vel = vel.vel;
-
+			//
+			// ResolveAABB's vel parameter is the PER-TICK DISPLACEMENT, not the
+			// velocity (it moves pos += vel internally). Pre-integrating
+			// (pos + vel*dt) AND passing the full velocity double-moved, and a
+			// collision restored only to the pre-integrated position - the
+			// player sank 0.005/tick through the stone floor (Bug1).
+			glm::vec2 new_pos = tf.pos;                    // current position
+			glm::vec2 move = vel.vel * dt;                 // per-tick displacement
 			// AABB resolution against solid mask (players only pass through
 			// non-solid: sand/water are passable in Phase 3). ResolveAABB is
 			// const and lock-free - safe for concurrent partition reads.
-			collision.ResolveAABB(new_pos, new_vel, tf.half_size);
+			collision.ResolveAABB(new_pos, move, tf.half_size);
 
-			// Apply gravity (all dynamic entities).
+			// A zeroed displacement that was non-zero = blocked on that axis ->
+			// zero the velocity too (standing on stone keeps vel.y = 0).
+			glm::vec2 new_vel = vel.vel;
+			if (vel.vel.x != 0.0f && move.x == 0.0f)
+				new_vel.x = 0.0f;
+			if (vel.vel.y != 0.0f && move.y == 0.0f)
+				new_vel.y = 0.0f;
+
+			// Apply gravity (all dynamic entities; velocity units).
 			new_vel.y -= 18.0f * kTick;
 			if (new_vel.y < -12.0f)
 				new_vel.y = -12.0f;

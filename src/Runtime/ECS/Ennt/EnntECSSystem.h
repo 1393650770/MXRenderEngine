@@ -92,6 +92,12 @@ inline void EnntECSSystem::RegisterComponentType()
 {
 	UInt32 type_id = ComponentTypeID::Get<T>();
 	if (m_component_ops.find(type_id) != m_component_ops.end()) return;
+	// Pre-create the EnTT storage on the LOGIC thread. ParallelForEach is
+	// called concurrently from JobSystem workers and does registry.storage<T>()
+	// (assure) - a first-time concurrent insert into the dense_map corrupts
+	// the shared_ptr refcounts (intermittent first-frame 0xC0000005). Every
+	// registered component's storage must exist before any parallel pass.
+	m_registry.storage<T>();
 	ComponentOps ops;
 	ops.add = [](entt::registry& reg, entt::entity e) -> void* {
 		return &reg.emplace<T>(e);

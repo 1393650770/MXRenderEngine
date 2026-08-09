@@ -28,9 +28,10 @@ namespace Render {
 class LineRendererManager
 {
 public:
-	static void Create();                    // sample OnGameInit
+	static void Create();                    // sample OnGameInit (or GameWorld owner)
 	static void Destroy();                   // sample OnShutdownScene end (world dies first)
 	static LineRendererManager& Get();
+	static Bool IsCreated() { return s_instance != nullptr; }   // collect task guard
 
 	// ---- Logic thread (GameWorld collect task) ----
 	// kSlotDepth must equal the FrameSynchronizer in-flight depth.

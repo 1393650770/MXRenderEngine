@@ -53,10 +53,12 @@ void SystemRegistry::Register(String debug_name, UniquePtr<ISystem> system)
 		SystemAccess access = p->GetAccess();
 		if (!access.touches_world_state)
 		{
-			// Conflict detection: this system's write set must not intersect
-			// any already-registered parallel system's (read ∪ write) set.
-			// First registration wins; later systems are demoted to
-			// sequential (conservative - prefer correctness over parallelism).
+			// Conflict detection (BIDIRECTIONAL): this system's write set must
+			// not intersect another parallel system's (read ∪ write), AND this
+			// system's read set must not intersect another's write set (a
+			// read-vs-write race is as real as write-vs-write - e.g. TrailUpdate
+			// reads Transform while Movement writes it). First registration
+			// wins; later systems are demoted to sequential.
 			parallel = true;
 			for (UInt32 i = 0; i < systems_.size(); ++i)
 			{
@@ -69,6 +71,17 @@ void SystemRegistry::Register(String debug_name, UniquePtr<ISystem> system)
 					{
 						parallel = false;
 						break;
+					}
+				}
+				if (parallel)
+				{
+					for (UInt32 r : access.read_components)
+					{
+						if (ContainsComp(other.write_components, r))
+						{
+							parallel = false;
+							break;
+						}
 					}
 				}
 				if (!parallel)

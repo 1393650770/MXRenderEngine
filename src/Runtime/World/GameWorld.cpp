@@ -139,6 +139,10 @@ void GameWorld::TickRunAudio(void* arg)
 void GameWorld::TickSyncTrails(void* arg)
 {
 	TickArgs* a = static_cast<TickArgs*>(arg);
+	// No-op when no trail facade was created (samples without trails) -
+	// Get() would dereference a null singleton.
+	if (!Render::LineRendererManager::IsCreated())
+		return;
 	Render::LineRendererManager& mgr = Render::LineRendererManager::Get();
 	const UInt64 frame = g_frame_number_render_thread.load();
 	Render::LineFrameState* out = mgr.GetWriteStates(frame);

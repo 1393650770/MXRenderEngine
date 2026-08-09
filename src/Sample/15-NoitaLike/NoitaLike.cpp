@@ -534,22 +534,6 @@ void NoitaLikeApp::OnGameTick()
 	HandleInput();
 	SyncHud();
 
-	// [Player-probe] temporary player telemetry.
-	{
-		static UInt32 s_probe = 0;
-		if (++s_probe % 60 == 0)
-		{
-			auto& ecs = world_->GetECS();
-			auto* tf = ecs.GetComponent<Gameplay::TransformComp>(m_player);
-			auto* vel = ecs.GetComponent<Gameplay::VelocityComp>(m_player);
-			if (tf && vel)
-				std::cout << "[Player] pos=(" << tf->pos.x << "," << tf->pos.y
-					<< ") vel=(" << vel->vel.x << "," << vel->vel.y
-					<< ") solid_below=" << world_->GetCollision().IsSolid((Int)tf->pos.x, (Int)(tf->pos.y - tf->half_size.y))
-					<< " solid_here=" << world_->GetCollision().IsSolid((Int)tf->pos.x, (Int)tf->pos.y) << std::endl;
-		}
-	}
-
 	// [DX] ENQUEUE_RENDER_COMMAND demo: every 120 ticks (2s) enqueue a command
 	// that executes on the render thread (flush point in RenderThreadMain);
 	// the fence proves consumption on a later tick. Logged ids let you compare
