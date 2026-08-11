@@ -29,6 +29,11 @@ static void GlfwScrollCallback(GLFWwindow*, double, double y)
 {
 	MXRender::Input::InputSystem::Get().FeedScroll((Float32)y);
 }
+static void GlfwCharCallback(GLFWwindow*, unsigned int codepoint)
+{
+	// UTF-32 codepoint — matches Rml::Character / UIInputBridge::ProcessChar
+	MXRender::Input::InputSystem::Get().FeedChar((UInt32)codepoint);
+}
 
 DesktopWindow::DesktopWindow(const String& title, UInt32 w, UInt32 h)
 {
@@ -47,6 +52,7 @@ DesktopWindow::DesktopWindow(const String& title, UInt32 w, UInt32 h)
 	glfwSetMouseButtonCallback(m_glfw_window, GlfwMouseButtonCallback);
 	glfwSetCursorPosCallback(m_glfw_window, GlfwCursorPosCallback);
 	glfwSetScrollCallback(m_glfw_window, GlfwScrollCallback);
+	glfwSetCharCallback(m_glfw_window, GlfwCharCallback);
 }
 
 DesktopWindow::~DesktopWindow()

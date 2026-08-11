@@ -47,6 +47,8 @@ public:
 	void METHOD(FeedMousePos)(Float32 x, Float32 y);
 	void METHOD(FeedMouseButton)(Int btn, Bool down);
 	void METHOD(FeedScroll)(Float32 delta);
+	/// Feed a text character (UTF-32 codepoint from glfwSetCharCallback).
+	void METHOD(FeedChar)(UInt32 codepoint);
 	void METHOD(FeedTouch)(CONST TouchState& touch);
 
 	// Query processed state (called by game code each frame)
@@ -60,6 +62,8 @@ public:
 	void METHOD(GetMouseDelta)(Float32& dx, Float32& dy) CONST;
 	Float32 METHOD(GetScrollDelta)() CONST;
 	CONST TouchState& METHOD(GetTouch)() CONST;
+	/// Characters typed since BeginFrame (UTF-32 codepoints, in order).
+	CONST Vector<UInt32>& METHOD(GetCharsThisFrame)() CONST;
 
 protected:
 private:
@@ -68,6 +72,7 @@ private:
 #pragma region MEMBER
 protected:
 	InputState m_state;
+	Vector<UInt32> m_chars;   // per-frame text input (cleared in BeginFrame)
 	Bool m_first_frame = true;
 private:
 	static InputSystem s_instance;

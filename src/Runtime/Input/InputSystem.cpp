@@ -17,6 +17,7 @@ void InputSystem::BeginFrame()
 	m_state.mouse_dx = 0.0f;
 	m_state.mouse_dy = 0.0f;
 	m_state.scroll_delta = 0.0f;
+	m_chars.clear();
 	std::memcpy(m_state.mouse_buttons_prev, m_state.mouse_buttons, sizeof(m_state.mouse_buttons));
 	m_state.touch.pointer_count = 0;
 
@@ -70,6 +71,11 @@ void InputSystem::FeedMouseButton(Int btn, Bool down)
 void InputSystem::FeedScroll(Float32 delta)
 {
 	m_state.scroll_delta += delta;
+}
+
+void InputSystem::FeedChar(UInt32 codepoint)
+{
+	m_chars.push_back(codepoint);
 }
 
 void InputSystem::FeedTouch(CONST TouchState& touch)
@@ -140,6 +146,8 @@ void InputSystem::GetMouseDelta(Float32& dx, Float32& dy) CONST
 Float32 InputSystem::GetScrollDelta() CONST { return m_state.scroll_delta; }
 
 CONST TouchState& InputSystem::GetTouch() CONST { return m_state.touch; }
+
+CONST Vector<UInt32>& InputSystem::GetCharsThisFrame() CONST { return m_chars; }
 
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE

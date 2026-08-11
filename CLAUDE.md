@@ -191,6 +191,14 @@ There is no input system: poll GLFW directly (`glfwGetMouseButton` / `glfwGetCur
 | RmlUI renderer | `src/Runtime/UI/RmlUI/RmlUIRenderer.h` |
 | RmlUI data binder | `src/Runtime/UI/RmlUI/RmlDataModelBinder.h` |
 | UI binding traits | `src/Runtime/UI/Widget/UIWidgetBinding.h` |
+| UI hot-reload service | `src/Runtime/UI/RmlUI/RmlUIHotReloadService.h` |
+
+## UI Dev Tooling (workflow)
+
+- **Hot reload (default ON)**: editing `resource/RmlUI/*.rml|*.rcss` reloads a running app within ~0.5s. `RmlUIHotReloadService` (logic thread, mtime poll) watches BOTH the source (`<project>/resource/`) and the output copy (cwd) per tracked path; source edits are atomically copied to the output before reload. xmake's incremental resource copy is unreliable — TrackPath content-syncs at LoadPanel time, so stale output files are fixed on load. RML reload = swap mode (load new doc first, close old on success; `UIDocHandle` stays valid, `data-model` rebinds automatically); parse failures are detected via SystemInterface log capture (RmlUi's XML parser is tolerant and returns a doc anyway) and keep the old document.
+- **F8 debugger**: `UIManager::Get().ToggleDebugger()` — RmlUi debugger starts hidden; F8 in the samples (level-latched — fixed-tick apps run N ticks/frame, edge checks double-toggle) flips it. Typed text reaches it via `InputSystem::FeedChar` → `UIInputBridge::ProcessChar` (DesktopWindow registers `glfwSetCharCallback`).
+- **Known limitation**: `ApplyHotReload` does NOT re-read inline `style=` attributes (documented RmlUi behavior) — UI tooling must write styles into RCSS `#id` rules instead.
+- `UIManager::Get().ReloadAllDocuments()` — force full reload (tooling/tests).
 
 ## Layering Verification Checklist
 

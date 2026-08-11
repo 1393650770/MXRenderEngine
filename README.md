@@ -245,6 +245,10 @@ UISystem (abstract backend)            ← Virtual methods with default empty im
 - **RmlUI Backend**: Full HTML/CSS UI middleware integration — load `.rml` documents, bind C++ data models, handle events
 - **Widget Framework**: RTTR-driven declarative widgets with `UI_BIND(Enable, ...)` field annotations — create a `UIWidgetManager`, call `CreateWidget<GameHUD>()`, and `SynchronizeAll()` each frame
 - **Sample Demo**: `12-RmlUI` demonstrates HP bars, score counters, timers, and event handlers — the Sample layer includes **zero** `<RmlUi/...>` headers
+- **Dev Tooling (UI workflow)**:
+  - **Hot reload** (default ON): edit `resource/RmlUI/*.rml` / `*.rcss` and the running app reloads within ~0.5s — the output copy is auto-synced from the source (xmake's incremental copy is unreliable), broken syntax keeps the old document, and direct edits to the output dir work too. Toggle via `UIManager::Get().EnableHotReload(false)`.
+  - **F8 debugger**: `UIManager::Get().ToggleDebugger()` (or F8 in the samples) opens the RmlUi built-in debugger — element tree, live style inspection, typing in its console works (characters flow through `InputSystem::FeedChar` → `UIInputBridge::ProcessChar`).
+  - `UIManager::Get().ReloadAllDocuments()` forces a full reload (used by tooling).
 
 ### 9️⃣ Multi-Threaded Rendering
 
