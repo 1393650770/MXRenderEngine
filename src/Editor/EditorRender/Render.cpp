@@ -1,4 +1,5 @@
 #include "Render.h"
+#include <thread>
 
 #include "Render/Core/RenderGraphPass.h"
 #include "RHI/RenderPipelineState.h"
@@ -16,6 +17,7 @@
 #include "RHI/RenderUtils.h"
 #include "UI/RenderGraphEditor/Panels/RenderGraphPanel.h"
 #include "UI/RenderGraphEditor/Services/EditorEventBus.h"
+#include "UI/UIPreviewPanel/UIPreviewPanel.h"
 #include "Render/Core/RenderGraphBuilder.h"
 #include "Render/Core/RenderGraphDefinition.h"
 
@@ -44,7 +46,6 @@ Vector<UInt32> ReadShader(CONST String& filename)
 void EditorRenderPipeline::OnInit_Logic(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 {
 	m_window = in_window; m_viewport = in_viewport;
-	std::cout << "Hello Editor" << std::endl;
 	editor_ui.Init(m_window, m_viewport);
 }
 
@@ -237,6 +238,9 @@ void EditorRenderPipeline::OnInit_Render()
 
 	// --  Register fallback shaders for loaded graph passes
 	InitRenderPasses();
+
+	// --  UI preview pass survives graph rebuilds (added again in RebuildFromDefinition)
+	EnsureUIPreviewPass(graph);
 }
 
 // -- 
@@ -339,6 +343,31 @@ void EditorRenderPipeline::RebuildFromDefinition(CONST MXRender::Render::RenderG
 		graph.Compile();
 		if (auto* rgp = editor_ui.GetRenderGraphPanel()) rgp->SyncRuntimeToEditor(&graph);
 	}
+	// UI preview pass is not part of any definition — re-add after rebuild.
+	EnsureUIPreviewPass(graph);
+}
+
+void EditorRenderPipeline::EnsureUIPreviewPass(Render::RenderGraph& graph)
+{
+	std::cout << "[UIPreview] EnsureUIPreviewPass" << std::endl;
+	for (auto& p : graph.GetPasses())
+		if (p->GetName() == "UIPreviewPass")
+			return;   // already present
+
+	struct UIPreviewPassData : public Render::RenderGraphPassDataBase
+	{
+		void Release() override {}
+	};
+	graph.AddRenderPass<UIPreviewPassData>("UIPreviewPass", &graph, RHIGetImmediateCommandList(),
+		[](UIPreviewPassData&, Render::RenderGraphPassBuilder&, RHI::CommandList*) {
+			// No resources declared — the pass must never be culled.
+		},
+		[](CONST UIPreviewPassData&, RHI::CommandList* cmd) {
+			UI::UIPreviewPanel::ExecutePreviewPass(cmd);
+		});
+	for (auto& p : graph.GetPasses())
+		if (p->GetName() == "UIPreviewPass")
+			p->SetIsCullable(false);
 }
 
 //  Logic thread: transfer deferred rebuild + ImGui context into FrameContext

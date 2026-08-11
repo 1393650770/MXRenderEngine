@@ -232,9 +232,12 @@ struct RHICmdUnmapBuffer : RHICommand {
 	class Buffer* buffer;
 	RHICmdUnmapBuffer(class Buffer* b) : RHICommand(RHICommandType::UnmapBuffer), buffer(b) {}
 };
-//  ImGui draw data: recorded on Render thread, replayed on RHI thread
+//  ImGui draw data: recorded on Render thread, replayed on RHI thread.
+//  The Editor runs in Single-thread mode (MX_THREAD_MODE=single, see
+//  Editor.cpp) where the command queue bypasses and this replays inline —
+//  the draw data is always the current frame's. No copy needed.
 struct RHICmdRenderImGui : RHICommand {
-	void* draw_data;     // ImDrawData* (valid during replay due to WaitFrameComplete sync)
+	void* draw_data;     // ImDrawData* (valid during replay)
 	void* imgui_context; // ImGuiContext* (restore before calling ImGui functions)
 	RHICmdRenderImGui(void* dd, void* ctx) : RHICommand(RHICommandType::RenderImGui), draw_data(dd), imgui_context(ctx) {}
 };

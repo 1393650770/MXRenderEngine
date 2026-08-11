@@ -4,4 +4,5 @@
 
 #include "RmlUIDemo.UIBinding.Gen.h"
 #include "NoitaLike.UIBinding.Gen.h"
+#include "UIPreviewData.UIBinding.Gen.h"
 

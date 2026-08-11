@@ -11,10 +11,13 @@
 #include <imgui_impl_vulkan.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_internal.h>
+#include "Render/Core/CommandQueue.h"
 #include "UI/BasePanel.h"
 #include "UI/RenderGraphEditor/Panels/RenderGraphPanel.h"
 #include "UI/RenderGraphEditor/Panels/PropertiesPanel.h"
 #include "UI/RenderGraphEditor/Panels/OutlinePanel.h"
+#include "UI/UIPreviewPanel/UIPreviewPanel.h"
+#include "RHI/Vulkan/VK_Texture.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Application)
@@ -22,9 +25,13 @@ MYRENDERER_BEGIN_NAMESPACE(Application)
 using namespace Render;
 using namespace RHI;
 using namespace UI;
+
+Map<RHI::Texture*, ImTextureID> EditorUI::preview_texture_cache;
+static std::mutex g_preview_tex_mutex;   // logic-thread reads vs render-thread writes
 void EditorUI::Init(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 {
 	m_window = in_window;
+	m_viewport = in_viewport;   // was never assigned — DrawFrame_Render dereferenced null
 	IMGUI_CHECKVERSION();
 	ImGuiContext* context = ImGui::CreateContext();
 	CHECK_WITH_LOG(context ==nullptr,"Failed to create ImGui context!");
@@ -32,7 +39,9 @@ void EditorUI::Init(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;         // Enable Multi-Viewport / Platform Windows
+	// Multi-viewport is DISABLED: UpdatePlatformWindows/RenderPlatformWindowsDefault
+		// crash on this editor's GLFW/3-thread setup (platform-window lifecycle vs
+		// the logic thread's frame loop). The editor is a single-window tool.
 	io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleViewports;
 	io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleFonts;
 	// Setup Dear ImGui style
@@ -56,6 +65,10 @@ void EditorUI::Init(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 	AddPanelUI(RenderGraphPanel::GetTypeName());
 	AddPanelUI(PropertiesPanel::GetTypeName());
 	AddPanelUI(OutlinePanel::GetTypeName());
+	// Host viewport FIRST: in Single mode the panel's init command executes
+	// INLINE during AddPanelUI (command queue bypass) and needs the viewport.
+	UIPreviewPanel::SetHostViewport(in_viewport);
+	AddPanelUI(UIPreviewPanel::GetTypeName());
 
 	// Cache the RenderGraphPanel reference and wire up data sources
 	for (auto* p : panels)
@@ -111,6 +124,7 @@ ImDrawData* EditorUI::DrawFrame_Logic()
 
 		for (auto& panel : panels)
 		{
+			panel->Update();   // logic-thread per-frame tick (UIManager::Update etc.)
 			panel->Draw();
 		}
 
@@ -138,15 +152,52 @@ void EditorUI::DrawFrame_Render(ImDrawData* draw_data, RHI::CommandList* cmd)
 		auto* vk_cb = static_cast<RHI::Vulkan::VK_CommandBuffer*>(cmd);
 		ImGui_ImplVulkan_RenderDrawData(draw_data, vk_cb->GetCommandBuffer());
 	} else {
+		// Safe under MX_FORCE_LOCKSTEP (Editor.cpp): frame N's replay completes
+		// before frame N+1's NewFrame reuses ImGui's draw-data buffers.
 		cmd->GetRecordedCommands().push_back(std::make_unique<RHICmdRenderImGui>(draw_data, ImGui::GetCurrentContext()));
 	}
 }
 
 void EditorUI::Release()
 {
+	{
+		std::lock_guard<std::mutex> lock(g_preview_tex_mutex);
+		for (auto& [tex, id] : preview_texture_cache)
+			ImGui_ImplVulkan_RemoveTexture((VkDescriptorSet)id);
+		preview_texture_cache.clear();
+	}
 	ImGui_ImplVulkan_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
+}
+
+ImTextureID EditorUI::GetPreviewTextureId(RHI::Texture* texture)
+{
+	if (!texture) return nullptr;
+	{
+		std::lock_guard<std::mutex> lock(g_preview_tex_mutex);
+		auto it = preview_texture_cache.find(texture);
+		if (it != preview_texture_cache.end())
+			return it->second;
+	}
+
+	// Deferred creation on the RENDER thread: ImGui's Vulkan backend is not
+	// thread-safe (RenderDrawData runs on the render thread), so creating the
+	// descriptor from the logic thread races with rendering. Returns nullptr
+	// until the command runs; the panel shows a blank frame meanwhile.
+	// This file is the sanctioned exception for Vulkan includes (EditorUI.cpp).
+	ENQUEUE_RENDER_COMMAND(UIPreviewTexCreate)([texture]()
+	{
+		auto* vk_tex = static_cast<RHI::Vulkan::VK_Texture*>(texture);
+		ImTextureID id = ImGui_ImplVulkan_AddTexture(
+			vk_tex->GetSampler(), vk_tex->GetImageView(),
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		{
+			std::lock_guard<std::mutex> lock(g_preview_tex_mutex);
+			preview_texture_cache[texture] = id;
+		}
+	});
+	return nullptr;
 }
 
 

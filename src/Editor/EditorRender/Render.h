@@ -48,6 +48,11 @@ public:
 	// --  Rebuild runtime graph from editor definition
 	void METHOD(RebuildFromDefinition)(CONST MXRender::Render::RenderGraphDefinition& def);
 
+	/// Adds the UIPreviewPass to the graph (no-op if already present). Called
+	/// from BOTH OnInit_Render and RebuildFromDefinition — the rebuild path
+	/// replaces the graph's passes.
+	void EnsureUIPreviewPass(Render::RenderGraph& graph);
+
 	PlatformWindow* METHOD(GetWindow)();
 protected:
 

@@ -142,4 +142,11 @@
 #include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/RenderGraphEditor/Services/SearchService.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/RenderGraphEditor/Templates/PassTemplate.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/RenderGraphEditor/Templates/TemplateLibrary.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIDocumentModel/RmlParser.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIDocumentModel/UIDocumentModel.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIDocumentModel/UIDocumentSerializer.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIDocumentModel/UIRcssParser.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIPreviewPanel/PreviewViewport.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIPreviewPanel/UIPreviewData.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Editor/UI/UIPreviewPanel/UIPreviewPanel.h"
 #endif

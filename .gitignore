@@ -134,3 +134,6 @@ pack/test_wasm.html
 pack/WeChat/game.js
 pack/Douyin/game.json
 
+
+# Runtime-generated UI preview documents (re-created by the editor on launch)
+resource/RmlUI/__preview__.*

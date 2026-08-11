@@ -10,6 +10,8 @@
 #include "VK_Viewport.h"
 #include "VK_Shader.h"
 #include <iostream>
+#include <cstring>
+#include <cstdlib>
 #include "Platform/PlatformDebug.h"
 #include <thread>
 #include "VK_Texture.h"
@@ -56,6 +58,18 @@ void VulkanRHI::Init(RenderFactory* render_factory)
 			Bool validation_optional = vulkan_render_factory->validation_optional;
 		//  从 factory 读取线程模式
 		g_thread_mode = vulkan_render_factory->threading_mode;
+		// Editor forces Single mode: its ImGui chain (NewFrame -> record ->
+		// RHI replay) touches ImGui's Vulkan backend across threads and the
+		// draw-data buffers are reused by the next NewFrame. Single mode
+		// executes commands inline, which is the safe (and sample-like) path.
+		const char* env = std::getenv("MX_THREAD_MODE");
+		if (env)
+		{
+			if (std::strcmp(env, "single") == 0)
+				g_thread_mode = EThreadingMode::Single;
+			else if (std::strcmp(env, "threethread") == 0)
+				g_thread_mode = EThreadingMode::ThreeThread;
+		}
 		g_enable_rhi_thread = (g_thread_mode >= EThreadingMode::RHIThread);
 		CreateInstance(enable_validation, validation_optional);
 		InitializeDebugmessenger(enable_debug_cb);

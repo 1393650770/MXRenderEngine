@@ -1,6 +1,7 @@
 if is_plat("windows") then
     add_requireconfs("**.glfw", {override = true, version = "3.4",configs = {shared = true,debug=true}})
 end
+
 if is_plat("android") then
     add_requires("glm","tinyobjloader","nlohmann_json","gli","optick","rttr")
     add_syslinks("vulkan", "android") -- libvulkan.so + libandroid.so on device
@@ -44,6 +45,46 @@ rule("module")
         target:set("kind", "static")  -- always static: avoids DLL CRT conflicts with flatbuffers(MT)
     end)
 rule_end()
+-- Custom glsl2spv rule: shaderc v2026.x glslc only accepts the `--target-env=<env>`
+-- equals form (the xmake built-in rule passes it space-separated, which fails
+-- with "unsupported option"). glslangValidator keeps the space form.
+rule("mx.glsl2spv")
+    set_extensions(".vert", ".tesc", ".tese", ".geom", ".comp", ".frag", ".mesh", ".task", ".rgen", ".rint", ".rahit", ".rchit", ".rmiss", ".rcall", ".glsl")
+    on_load(function (target)
+        local is_bin2c = target:extraconf("rules", "mx.glsl2spv", "bin2c")
+        if is_bin2c then
+            local headerdir = path.join(target:autogendir(), "rules", "mx", "glsl2spv")
+            if not os.isdir(headerdir) then os.mkdir(headerdir) end
+            target:add("includedirs", headerdir)
+        end
+    end)
+    before_buildcmd_file(function (target, batchcmds, sourcefile_glsl, opt)
+        import("lib.detect.find_tool")
+        local glslangValidator = find_tool("glslangValidator")
+        local glslc = find_tool("glslc")
+        assert(glslangValidator or glslc, "glslangValidator or glslc not found!")
+
+        local targetenv = target:extraconf("rules", "mx.glsl2spv", "targetenv") or "vulkan1.0"
+        local client = target:extraconf("rules", "mx.glsl2spv", "client") or "vulkan100"
+        local debugsource = target:extraconf("rules", "mx.glsl2spv", "debugsource") or false
+        local outputdir = target:extraconf("rules", "mx.glsl2spv", "outputdir") or path.join(target:autogendir(), "rules", "mx", "glsl2spv")
+        local spvfilepath = path.join(outputdir, path.filename(sourcefile_glsl) .. ".spv")
+        batchcmds:show_progress(opt.progress, "${color.build.object}generating.glsl2spv %s", sourcefile_glsl)
+        batchcmds:mkdir(outputdir)
+        if glslangValidator then
+            if debugsource then
+                batchcmds:vrunv(glslangValidator.program, {"--target-env", targetenv, "--client", client, "-gVS", "-o", path(spvfilepath), path(sourcefile_glsl)})
+            else
+                batchcmds:vrunv(glslangValidator.program, {"--target-env", targetenv, "--client", client, "-o", path(spvfilepath), path(sourcefile_glsl)})
+            end
+        else
+            batchcmds:vrunv(glslc.program, {"--target-env=" .. targetenv, "-o", path(spvfilepath), path(sourcefile_glsl)})
+        end
+        batchcmds:add_depfiles(sourcefile_glsl)
+        batchcmds:set_depmtime(os.mtime(spvfilepath))
+        batchcmds:set_depcache(target:dependfile(spvfilepath))
+    end)
+
 includes("src/**/xmake.lua")
 
 rule("flatbufferFile")
@@ -360,7 +401,7 @@ function CommonProjectSetting()
         add_packages("glm","tinyobjloader","imgui","flatbuffers","rttr","nlohmann_json")
     end
     if not is_plat("android","wasm") then
-        add_packages("assimp","lz4","boost","glfw")
+        add_packages("assimp","lz4","boost","glfw","gli")   -- gli: VK_Texture.h (EditorUI preview texture ids)
     end
 end
 
@@ -404,7 +445,7 @@ target("Runtime")
         add_packages("glslang")
     end
     if not is_plat("wasm") then
-        add_rules("utils.glsl2spv", {outputdir = "$(projectdir)/src/Runtime/GenCode/Shader",bin2c = true})
+        add_rules("mx.glsl2spv", {outputdir = "$(projectdir)/src/Runtime/GenCode/Shader",bin2c = true})
         add_files("resource/Shader/**|**.spv|**.bat|**.exe|**.h|**.glsl|**.wgsl", {build = false})
     end
     set_group("Runtime")
@@ -424,7 +465,8 @@ target("Editor")
     add_defines("IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING")
     add_headerfiles("src/Editor/**.h")
     add_packages("nlohmann_json")
-    add_files("src/Editor/**.cpp") 
+    add_deps("CssToRcssLib")   -- RCSS parser + whitelist for the UI document model
+    add_files("src/Editor/**.cpp")
     add_includedirs("src/Editor")
     set_group("Editor")
     after_build(MoveResource)

@@ -42,6 +42,11 @@ public:
 	// Panel access (for OutlinePanel etc.)
 	UI::RenderGraphPanel* METHOD(GetRenderGraphPanel)();
 
+	/// ImGui texture id for an RHI texture (lazily creates a Vulkan descriptor
+	/// set via ImGui_ImplVulkan_AddTexture; cached, freed in Release()).
+	/// Lives in EditorUI.cpp — the sanctioned Vulkan-include exception file.
+	static ImTextureID METHOD(GetPreviewTextureId)(RHI::Texture* texture);
+
 protected:
 	void AddPanelUI(CONST String& name);
 	void AddPanelUI(UI::BasePanel* in_panel);
@@ -61,6 +66,7 @@ protected:
 	Render::RenderGraph* graph_ptr = nullptr;
 	UI::RenderGraphPanel* rg_panel = nullptr; // cached reference
 private:
+	static Map<RHI::Texture*, ImTextureID> preview_texture_cache;
 #pragma endregion
 
 MYRENDERER_END_CLASS
