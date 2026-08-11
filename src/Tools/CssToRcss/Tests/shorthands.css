@@ -1,0 +1,7 @@
+/* border expands (style keyword dropped); font/overflow/transition pass through */
+.card {
+    border: 1px solid red;
+    font: bold 14px "Ark Pixel 10px Mono latin";
+    overflow: hidden auto;
+    transition: all 0.2s ease;
+}

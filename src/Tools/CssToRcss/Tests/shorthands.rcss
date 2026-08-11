@@ -1,0 +1,13 @@
+.card {
+	border-top-width: 1px;
+	border-top-color: #ff0000;
+	border-right-width: 1px;
+	border-right-color: #ff0000;
+	border-bottom-width: 1px;
+	border-bottom-color: #ff0000;
+	border-left-width: 1px;
+	border-left-color: #ff0000;
+	font: bold 14px "Ark Pixel 10px Mono latin";
+	overflow: hidden auto;
+	transition: all 0.2s ease;
+}

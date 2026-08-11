@@ -1,0 +1,6 @@
+/* Colors normalize to #rrggbb / #rrggbbaa */
+.c1 { color: red; background-color: #abc; }
+.c2 { border-color: rgb(255, 0, 0); }
+.c3 { background: rgba(0, 128, 255, 0.5); }
+.c4 { color: hsl(120, 100%, 25%); }
+.c5 { color: #abcd; }

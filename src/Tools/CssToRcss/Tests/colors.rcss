@@ -1,0 +1,16 @@
+.c1 {
+	color: #ff0000;
+	background-color: #aabbcc;
+}
+.c2 {
+	border-color: #ff0000;
+}
+.c3 {
+	background: #0080ff80;
+}
+.c4 {
+	color: #008000;
+}
+.c5 {
+	color: #aabbccdd;
+}

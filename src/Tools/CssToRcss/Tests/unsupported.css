@@ -1,0 +1,9 @@
+.bad {
+    width: calc(100% - 20px);
+    margin: var(--m);
+    position: sticky;
+    background-image: url("a.png");
+    text-shadow: 0 0 2px black;
+    content: "x";
+    --custom: 3;
+}
