@@ -17,6 +17,11 @@ class RmlUISystemInterface::Impl : public Rml::SystemInterface
 public:
 	Float64 elapsed_time = 0.0;
 
+	// Log capture state (hot-reload tooling). All RmlUi activity runs on the
+	// render thread, so this needs no locking.
+	bool capturing_log = false;
+	Int   log_warning_count = 0;
+
 	double GetElapsedTime() override
 	{
 		return elapsed_time;
@@ -24,6 +29,9 @@ public:
 
 	bool LogMessage(Rml::Log::Type type, const Rml::String& message) override
 	{
+		if (capturing_log && (type == Rml::Log::LT_ERROR || type == Rml::Log::LT_WARNING))
+			++log_warning_count;
+
 		// Route RmlUI logs to std::cout (matches project convention)
 		const char* prefix = "";
 		switch (type)
@@ -74,6 +82,20 @@ void RmlUISystemInterface::Uninstall()
 	{
 		Rml::SetSystemInterface(nullptr);
 	}
+}
+
+void RmlUISystemInterface::BeginLogCapture()
+{
+	if (!m_impl) return;
+	m_impl->log_warning_count = 0;
+	m_impl->capturing_log = true;
+}
+
+Int RmlUISystemInterface::EndLogCapture()
+{
+	if (!m_impl) return 0;
+	m_impl->capturing_log = false;
+	return m_impl->log_warning_count;
 }
 
 MYRENDERER_END_NAMESPACE

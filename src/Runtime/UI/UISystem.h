@@ -72,6 +72,17 @@ public:
 	VIRTUAL bool METHOD(LoadFont)(CONST String& path) { (void)path; return false; }
 	VIRTUAL bool METHOD(IsMouseInteracting)() CONST { return false; }
 
+	// ---- Dev tooling (default empty impls — backends override as needed) ----
+	/// Enable/disable hot reload of UI source files (RML/RCSS).
+	virtual void EnableHotReload(bool enabled) { (void)enabled; }
+	/// Poll for UI source changes. Logic thread only (called by UIManager::Update);
+	/// backends apply detected changes on their own thread via the command channel.
+	virtual void PollHotReload(Float32 dt) { (void)dt; }
+	/// Toggle the backend's built-in debugger. Thread-safe (backend-side dispatch).
+	virtual void ToggleDebugger() {}
+	/// Manually reload all open documents (used by tooling/tests). Thread-safe.
+	virtual void ReloadAllDocuments() {}
+
 protected:
 private:
 	UISystem(CONST UISystem&) MYDELETE;

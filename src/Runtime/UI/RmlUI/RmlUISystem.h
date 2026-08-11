@@ -5,6 +5,7 @@
 #include "Core/ConstDefine.h"
 #include "UI/UISystem.h"
 #include "UI/UIHandleTypes.h"
+#include "RmlUIHotReloadService.h"
 
 #include <RmlUi/Core/DataModelHandle.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -34,6 +35,7 @@ struct ModelEntry {
 };
 struct DocEntry {
 	::Rml::ElementDocument* doc;
+	String path;   // LoadPanel path (relative, e.g. "RmlUI/DemoPanel.rml") — hot-reload matching
 };
 
 /**
@@ -72,10 +74,19 @@ public:
 	VIRTUAL bool METHOD(LoadFont)(CONST String& path) OVERRIDE;
 	VIRTUAL bool METHOD(IsMouseInteracting)() CONST OVERRIDE;
 
+	// ---- Dev tooling (modern style) ----
+	void EnableHotReload(bool enabled) override;
+	void PollHotReload(Float32 dt) override;
+	void ToggleDebugger() override;
+	void ReloadAllDocuments() override;
+
 protected:
 private:
 	void METHOD(SetupInterfaces)();
 	void METHOD(TeardownInterfaces)();
+
+	/// Apply a hot-reload change set. RENDER thread only (enqueued by PollHotReload).
+	void ApplyHotReload(const UIHotReloadChangeSet& changes);
 
 	::Rml::Context* METHOD(GetContext)() CONST { return m_context; }
 
@@ -110,6 +121,9 @@ private:
 	// Registries
 	Map<GenericHandle, ModelEntry>* m_model_registry = nullptr;
 	Map<GenericHandle, DocEntry>*    m_doc_registry = nullptr;
+
+	// Hot-reload file watcher (logic-thread owned; render thread never touches it)
+	RmlUIHotReloadService* m_hot_reload_service = nullptr;
 
 	// Next handles
 	UInt32 m_next_model_handle = 1;

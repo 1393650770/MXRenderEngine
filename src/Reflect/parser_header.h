@@ -57,6 +57,7 @@
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/Binding/RmlUIEventListener.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlDataModelBinder.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlUIFileInterface.h"
+#include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlUIHotReloadService.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlUIInputBridge.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlUIRenderer.h"
 #include  "D:/Project/GameDevelop/MyRenderer/src/Runtime/UI/RmlUI/RmlUIRenderInterface.h"

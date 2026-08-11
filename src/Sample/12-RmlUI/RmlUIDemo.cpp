@@ -118,20 +118,40 @@ void RmlUIDemoApp::OnUpdate(float dt)
 		bridge->ProcessMouseScroll(0.0f, scroll);
 
 	using namespace MXRender::Input;
-	auto CheckKey = [&](const Key& k) {
-		if (input.IsKeyPressed(k))
-			bridge->ProcessKey(k, true);
-		if (input.IsKeyReleased(k))
-			bridge->ProcessKey(k, false);
+	// F8 toggles the RmlUi built-in debugger (element tree, live style editing).
+	// Level-latched: a single press must flip the toggle exactly once.
+	const bool f8_down = input.IsKeyDown(EKey::F8);
+	if (f8_down && !m_prev_f8_down)
+		UIManager::Get().ToggleDebugger();
+	m_prev_f8_down = f8_down;
+
+	// Forward the full keyboard to the UI bridge so the debugger (tree
+	// navigation, console) and future text inputs work. RmlUi ignores keys when
+	// nothing is focused — game input reads InputSystem directly, unaffected.
+	static const Key kAllKeys[] = {
+		EKey::A, EKey::B, EKey::C, EKey::D, EKey::E, EKey::F, EKey::G, EKey::H,
+		EKey::I, EKey::J, EKey::K, EKey::L, EKey::M, EKey::N, EKey::O, EKey::P,
+		EKey::Q, EKey::R, EKey::S, EKey::T, EKey::U, EKey::V, EKey::W, EKey::X,
+		EKey::Y, EKey::Z,
+		EKey::K0, EKey::K1, EKey::K2, EKey::K3, EKey::K4,
+		EKey::K5, EKey::K6, EKey::K7, EKey::K8, EKey::K9,
+		EKey::F1, EKey::F2, EKey::F3, EKey::F4, EKey::F5, EKey::F6,
+		EKey::F7, EKey::F8, EKey::F9, EKey::F10, EKey::F11, EKey::F12,
+		EKey::Escape, EKey::Tab, EKey::Enter, EKey::Backspace, EKey::Delete, EKey::Space,
+		EKey::Up, EKey::Down, EKey::Left, EKey::Right,
+		EKey::LeftShift, EKey::RightShift, EKey::LeftCtrl, EKey::RightCtrl,
+		EKey::LeftAlt, EKey::RightAlt,
 	};
-	CheckKey(EKey::Escape);
-	CheckKey(EKey::Tab);
-	CheckKey(EKey::Enter);
-	CheckKey(EKey::Space);
-	CheckKey(EKey::Up);
-	CheckKey(EKey::Down);
-	CheckKey(EKey::Left);
-	CheckKey(EKey::Right);
+	for (const Key& k : kAllKeys)
+	{
+		if (input.IsKeyPressed(k))  bridge->ProcessKey(k, true);
+		if (input.IsKeyReleased(k)) bridge->ProcessKey(k, false);
+	}
+
+	// Forward typed characters (debugger console input, future text boxes).
+	// UTF-32 codepoints, cleared once per frame by InputSystem::BeginFrame.
+	for (UInt32 c : input.GetCharsThisFrame())
+		bridge->ProcessChar(c);
 
 	UIManager::Get().Update(dt);
 }

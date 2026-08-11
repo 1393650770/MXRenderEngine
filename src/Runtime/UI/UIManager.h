@@ -89,6 +89,14 @@ public:
 	// Query
 	bool METHOD(IsMouseInteracting)() CONST;
 
+	// ---- Dev tooling (backend-agnostic pass-throughs) ----
+	/// Enable/disable hot reload of UI source files. Default: enabled.
+	void EnableHotReload(bool enabled);
+	/// Toggle the backend's built-in debugger (e.g. RmlUi F8 debugger).
+	void ToggleDebugger();
+	/// Manually reload all open documents (tooling/tests).
+	void ReloadAllDocuments();
+
 private:
 	UIManager() MYDEFAULT;
 	~UIManager() MYDEFAULT;

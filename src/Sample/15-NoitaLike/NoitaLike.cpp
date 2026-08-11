@@ -43,6 +43,7 @@ namespace MXRender { namespace UI { namespace Widget {
 #include "Render/LineRenderer/LineRendererManager.h"
 #include "Render/LineRenderer/LineRendererPass.h"
 #include "UI/UIManager.h"
+#include "UI/UIInputBridge.h"
 #include "UI/RmlUI/RmlUISystem.h"
 #include "UI/UIRenderPass.h"
 #include "RmlUI/NoitaLike.UIBinding.Gen.h"
@@ -559,6 +560,48 @@ void NoitaLikeApp::OnGameTick()
 	{
 		std::cout << "[DX-Demo] fence complete (render thread consumed the command)" << std::endl;
 		m_dx_demo_pending = false;
+	}
+
+	// UI dev tooling: F8 toggles the RmlUi debugger; forward the full keyboard
+	// to the UI bridge (debugger tree navigation). RmlUi ignores keys when
+	// nothing is focused — gameplay input reads InputSystem directly.
+	{
+		auto& input = MXRender::Input::InputSystem::Get();
+		// Level-latched: OnGameTick runs 4× per render frame, an edge check
+		// would flip the toggle once per tick.
+		const bool f8_down = input.IsKeyDown(MXRender::Input::EKey::F8);
+		if (f8_down && !m_prev_f8_down)
+			MXRender::UI::UIManager::Get().ToggleDebugger();
+		m_prev_f8_down = f8_down;
+
+		auto* bridge = MXRender::UI::UIManager::Get().GetInputBridge();
+		if (bridge)
+		{
+			using namespace MXRender::Input;
+			static const Key kAllKeys[] = {
+				EKey::A, EKey::B, EKey::C, EKey::D, EKey::E, EKey::F, EKey::G, EKey::H,
+				EKey::I, EKey::J, EKey::K, EKey::L, EKey::M, EKey::N, EKey::O, EKey::P,
+				EKey::Q, EKey::R, EKey::S, EKey::T, EKey::U, EKey::V, EKey::W, EKey::X,
+				EKey::Y, EKey::Z,
+				EKey::K0, EKey::K1, EKey::K2, EKey::K3, EKey::K4,
+				EKey::K5, EKey::K6, EKey::K7, EKey::K8, EKey::K9,
+				EKey::F1, EKey::F2, EKey::F3, EKey::F4, EKey::F5, EKey::F6,
+				EKey::F7, EKey::F8, EKey::F9, EKey::F10, EKey::F11, EKey::F12,
+				EKey::Escape, EKey::Tab, EKey::Enter, EKey::Backspace, EKey::Delete, EKey::Space,
+				EKey::Up, EKey::Down, EKey::Left, EKey::Right,
+				EKey::LeftShift, EKey::RightShift, EKey::LeftCtrl, EKey::RightCtrl,
+				EKey::LeftAlt, EKey::RightAlt,
+			};
+			for (const Key& k : kAllKeys)
+			{
+				if (input.IsKeyPressed(k))  bridge->ProcessKey(k, true);
+				if (input.IsKeyReleased(k)) bridge->ProcessKey(k, false);
+			}
+			// Forward typed characters (debugger console input). BeginFrame
+			// clears once per frame — the first of 4 ticks consumes them.
+			for (UInt32 c : input.GetCharsThisFrame())
+				bridge->ProcessChar(c);
+		}
 	}
 
 	// RmlUI per-frame update (layout dirty-mark propagation, data binding

@@ -50,6 +50,10 @@ void UIManager::Destroy()
 void UIManager::Update(Float32 dt)
 {
 	if (!m_backend) return;
+	// Hot-reload polling runs on the LOGIC thread (cheap mtime stats, 0.5s
+	// interval); any detected changes are applied on the render thread by the
+	// backend via the command channel.
+	m_backend->PollHotReload(dt);
 	// UI backends (RmlUI) are single-threaded and Render() executes on the
 	// render thread - Update must run there too. Enqueue via the command
 	// channel (flush point runs it before OnPreRender). Calling from the
@@ -149,6 +153,25 @@ bool UIManager::LoadFont(CONST String& file_path)
 bool UIManager::IsMouseInteracting() CONST
 {
 	return m_backend ? m_backend->IsMouseInteracting() : false;
+}
+
+// =========================================================================
+// Dev tooling
+// =========================================================================
+
+void UIManager::EnableHotReload(bool enabled)
+{
+	if (m_backend) m_backend->EnableHotReload(enabled);
+}
+
+void UIManager::ToggleDebugger()
+{
+	if (m_backend) m_backend->ToggleDebugger();
+}
+
+void UIManager::ReloadAllDocuments()
+{
+	if (m_backend) m_backend->ReloadAllDocuments();
 }
 
 MYRENDERER_END_NAMESPACE // UI

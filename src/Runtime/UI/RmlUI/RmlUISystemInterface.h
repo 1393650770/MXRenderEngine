@@ -35,6 +35,15 @@ public:
 	/// Uninstall this SystemInterface. Called during shutdown.
 	void METHOD(Uninstall)();
 
+	// ---- Log capture (hot-reload tooling) ----
+	/// Start counting ERROR/WARNING log messages (render thread only).
+	/// RmlUi's tolerant XML parser logs warnings and still returns a document,
+	/// so a bare LoadDocument success is NOT proof of a clean parse.
+	void BeginLogCapture();
+	/// Stop counting; returns how many ERROR/WARNING messages were logged
+	/// since BeginLogCapture (render thread only).
+	Int EndLogCapture();
+
 protected:
 private:
 	// Rml::SystemInterface virtuals are implemented via internal class

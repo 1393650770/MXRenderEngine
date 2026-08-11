@@ -68,6 +68,7 @@ protected:
 	std::atomic<UInt32> m_pending_ticks{ 0 };
 	UInt32 m_frame_count = 0;
 	Bool m_prev_fire = false;
+	Bool m_prev_f8_down = false;   // level-latch: F8 toggles once per press (4 ticks/frame!)
 	// Current frame's snapshot (set on the RENDER thread in OnPreRender from
 	// FrameContext; execute lambdas read it - never reach into live world).
 	CONST World::FrameSnapshot* m_render_snapshot = nullptr;

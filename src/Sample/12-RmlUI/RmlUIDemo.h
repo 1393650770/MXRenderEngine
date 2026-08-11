@@ -61,6 +61,7 @@ protected:
 private:
 	MXRender::UI::UIModelHandle m_hud_model;
 	MXRender::UI::UIDocHandle   m_hud_doc;
+	bool m_prev_f8_down = false;   // level-latch: F8 toggles once per press
 #pragma endregion
 };
 #endif // !_RMLUIDEMO_

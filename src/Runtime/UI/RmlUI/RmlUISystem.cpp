@@ -5,6 +5,7 @@
 #include "RmlUIRenderer.h"
 #include "RmlUIRenderInterface.h"
 #include "RmlDataModelBinder.h"
+#include "RmlUIHotReloadService.h"
 #include "UI/UIRenderer.h"
 
 #include <RmlUi/Core.h>
@@ -17,6 +18,7 @@
 #include "RHI/RenderTexture.h"
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderCommandList.h"
+#include "Render/Core/CommandQueue.h"
 #include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -46,6 +48,9 @@ void RmlUISystem::Init(RHI::Viewport* viewport)
 	m_model_registry = new Map<GenericHandle, ModelEntry>();
 	m_doc_registry = new Map<GenericHandle, DocEntry>();
 
+	// Hot-reload file watcher (logic-thread owned)
+	m_hot_reload_service = new RmlUIHotReloadService();
+
 	SetupInterfaces();
 
 	// Create renderer and install BEFORE Rml::CreateContext (RmlUI requires it)
@@ -68,6 +73,9 @@ void RmlUISystem::Init(RHI::Viewport* viewport)
 	// Enable RmlUi debugger (F8 to toggle)
 	if (m_context && !Rml::Debugger::IsVisible())
 		Rml::Debugger::Initialise(m_context);
+	// The debugger menu is visible by default — start hidden, F8 reveals it.
+	if (m_context)
+		Rml::Debugger::SetVisible(false);
 
 	auto* ctx = m_context;
 	std::cout << "[RmlUISystem] Initialized — context \"" << ctx->GetName()
@@ -108,6 +116,9 @@ void RmlUISystem::Shutdown()
 	// 6. Delete registries
 	delete m_model_registry; m_model_registry = nullptr;
 	delete m_doc_registry;   m_doc_registry = nullptr;
+
+	// 7. Release hot-reload service
+	delete m_hot_reload_service; m_hot_reload_service = nullptr;
 
 	m_initialized = false;
 	m_context = nullptr;
@@ -244,6 +255,11 @@ UIDocHandle RmlUISystem::LoadPanel(CONST String& path)
 	auto* ctx = m_context;
 	if (!ctx) return {};
 
+	// Sync the output copy from the source BEFORE loading (xmake's incremental
+	// resource copy is unreliable; a stale output file must not be loaded).
+	if (m_hot_reload_service)
+		m_hot_reload_service->TrackPath(path);
+
 	auto* doc = ctx->LoadDocument(path);
 	if (!doc)
 	{
@@ -253,7 +269,7 @@ UIDocHandle RmlUISystem::LoadPanel(CONST String& path)
 
 	UIDocHandle h; h.value = m_next_doc_handle++;
 	auto* reg = m_doc_registry;
-	(*reg)[h.value] = { doc };
+	(*reg)[h.value] = DocEntry{ doc, path };
 	return h;
 }
 
@@ -299,6 +315,132 @@ bool RmlUISystem::IsMouseInteracting() CONST
 	auto* ctx = m_context;
 	if (!ctx) return false;
 	return ctx->IsMouseInteracting();
+}
+
+// =========================================================================
+// Dev tooling: hot reload + debugger
+//
+// Thread model (matches the whole RmlUI backend):
+//   - PollHotReload runs on the LOGIC thread (cheap mtime stats, driven by
+//     UIManager::Update); it only builds a UIHotReloadChangeSet.
+//   - The change set is passed BY VALUE into a render-thread command;
+//     ApplyHotReload mutates the doc registry / Rml::Context on the RENDER
+//     thread (their owning thread).
+// Known limitation: the RmlUi debugger's console cannot receive typed text —
+// there is no char-callback source in the platform input layer yet.
+// =========================================================================
+
+void RmlUISystem::EnableHotReload(bool enabled)
+{
+	if (m_hot_reload_service)
+		m_hot_reload_service->Enable(enabled);
+}
+
+void RmlUISystem::PollHotReload(Float32 dt)
+{
+	ASSERT_LOGIC_THREAD();
+	if (!m_hot_reload_service) return;
+
+	UIHotReloadChangeSet changes = m_hot_reload_service->Poll(dt);
+	if (changes.empty()) return;
+
+	// Apply on the render thread (context + doc registry are render-thread owned).
+	ENQUEUE_RENDER_COMMAND(UIHotReloadApply)([this, changes]()
+	{
+		ApplyHotReload(changes);
+	});
+}
+
+void RmlUISystem::ApplyHotReload(const UIHotReloadChangeSet& changes)
+{
+	ASSERT_RENDER_THREAD();
+	auto* ctx = m_context;
+	if (!ctx || !m_doc_registry) return;
+
+	if (changes.rcss_changed)
+	{
+		// Reload every open document's stylesheet. RmlUi clears the stylesheet
+		// cache internally, so documents sharing one .rcss all refresh without
+		// us parsing <link> references. Inline `style` attributes are NOT
+		// re-read (documented RmlUi limitation).
+		Int count = 0;
+		for (auto& entry : *m_doc_registry)
+			if (entry.second.doc) { entry.second.doc->ReloadStyleSheet(); ++count; }
+		std::cout << "[UIHotReload] stylesheet reloaded for " << count << " doc(s)" << std::endl;
+	}
+
+	for (const auto& path : changes.rml_changed_paths)
+	{
+		// Swap mode: load the NEW document first; only on success close the old
+		// one and swap the pointer in-place (UIDocHandle stays valid, the
+		// data-model rebinds automatically via the `data-model` attribute).
+		// On failure keep the old document — a broken edit must not destroy UI.
+		// Note: RmlUi's XML parser is TOLERANT — it logs warnings and still
+		// returns a document for malformed input, so we capture ERROR/WARNING
+		// log messages during LoadDocument and treat any as a failed load.
+		Int matches = 0;
+		Int aborted = 0;
+		for (auto& entry : *m_doc_registry)
+		{
+			if (entry.second.path != path || !entry.second.doc) continue;
+			if (m_system_interface)
+				m_system_interface->BeginLogCapture();
+			auto* new_doc = ctx->LoadDocument(path);
+			const Int load_problems = m_system_interface ? m_system_interface->EndLogCapture() : 0;
+			if (!new_doc || load_problems > 0)
+			{
+				if (new_doc) new_doc->Close(); // discard the mangled fresh copy
+				std::cerr << "[UIHotReload] reload aborted: " << path << " — "
+					<< load_problems << " parse warning(s)/error(s), keeping old document" << std::endl;
+				++aborted;
+				continue;
+			}
+			auto* old_doc = entry.second.doc;
+			entry.second.doc = new_doc;
+			if (old_doc) old_doc->Close();
+			new_doc->Show();   // dev tool: always show the fresh copy
+			++matches;
+		}
+		if (matches > 0)
+			std::cout << "[UIHotReload] RML reloaded: " << path << " (" << matches << " doc(s))" << std::endl;
+		else if (aborted == 0)
+			std::cout << "[UIHotReload] RML changed, no matching open doc: " << path << std::endl;
+	}
+}
+
+void RmlUISystem::ToggleDebugger()
+{
+	// Debugger plugin was initialised in Init(); SetVisible/IsVisible are
+	// null-pointer safe. Dispatch to the render thread like everything else
+	// that touches Rml::Context.
+	ENQUEUE_RENDER_COMMAND(UIToggleDebugger)([this]()
+	{
+		ASSERT_RENDER_THREAD();
+		if (m_context)
+		{
+			// Note: Debugger::IsVisible() reads the per-frame computed flag
+			// (updated during ctx->Update), so log the INTENDED state, not
+			// the queried one (which lags one frame).
+			const bool visible = Rml::Debugger::IsVisible();
+			Rml::Debugger::SetVisible(!visible);
+			std::cout << "[UIHotReload] debugger " << (!visible ? "shown" : "hidden") << std::endl;
+		}
+	});
+}
+
+void RmlUISystem::ReloadAllDocuments()
+{
+	// Build the change set INSIDE the command (doc registry is render-thread
+	// owned — never read it from the logic thread).
+	ENQUEUE_RENDER_COMMAND(UIHotReloadApply)([this]()
+	{
+		UIHotReloadChangeSet changes;
+		changes.rcss_changed = true;
+		if (m_doc_registry)
+			for (auto& entry : *m_doc_registry)
+				changes.rml_changed_paths.push_back(entry.second.path);
+		ApplyHotReload(changes);
+	});
 }
 
 // =========================================================================
