@@ -83,6 +83,21 @@ public:
 	/// Manually reload all open documents (used by tooling/tests). Thread-safe.
 	virtual void ReloadAllDocuments() {}
 
+	// ---- Editor designer support (WYSIWYG overlay; backends override) ----
+	/// Element id under viewport-local coordinates ("" = none). Climbs to the
+	/// nearest ancestor with an id — designers want whole widgets, not leaves.
+	/// LOGIC thread only (same ownership as the backend's per-frame Update).
+	virtual String PickElementAt(Int x, Int y) { (void)x; (void)y; return {}; }
+	/// Current box (x, y, w, h) of an element in viewport px. False if unknown.
+	virtual Bool GetElementBox(const String& id, Float32& x, Float32& y,
+		Float32& w, Float32& h) { (void)id; return false; }
+	/// TRANSIENT overlay: repositions an element without persisting. Rendered
+	/// as inline style — the hot-reload pipeline re-reads only the stylesheet,
+	/// so overlays vanish on reload (exactly what drag previews need; the
+	/// designer commits boxes into #id rules at drop time instead).
+	virtual void SetElementBoxTransient(const String& id, Float32 x, Float32 y,
+		Float32 w, Float32 h) { (void)id; }
+
 protected:
 private:
 	UISystem(CONST UISystem&) MYDELETE;

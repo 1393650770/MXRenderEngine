@@ -17,6 +17,8 @@
 #include "UI/RenderGraphEditor/Panels/PropertiesPanel.h"
 #include "UI/RenderGraphEditor/Panels/OutlinePanel.h"
 #include "UI/UIPreviewPanel/UIPreviewPanel.h"
+#include "UI/UIDesigner/UIPalette.h"
+#include "UI/UIDesigner/UIPropertyPanel.h"
 #include "RHI/Vulkan/VK_Texture.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -69,6 +71,9 @@ void EditorUI::Init(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 	// INLINE during AddPanelUI (command queue bypass) and needs the viewport.
 	UIPreviewPanel::SetHostViewport(in_viewport);
 	AddPanelUI(UIPreviewPanel::GetTypeName());
+	// UI designer panels (palette drag-source + whitelist-driven property editor).
+	AddPanelUI(UIPalettePanel::GetTypeName());
+	AddPanelUI(UIPropertyPanel::GetTypeName());
 
 	// Cache the RenderGraphPanel reference and wire up data sources
 	for (auto* p : panels)
@@ -199,7 +204,6 @@ ImTextureID EditorUI::GetPreviewTextureId(RHI::Texture* texture)
 	});
 	return nullptr;
 }
-
 
 void EditorUI::AddPanelUI(CONST String& name)
 {

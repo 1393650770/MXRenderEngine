@@ -80,6 +80,15 @@ public:
 	void ToggleDebugger() override;
 	void ReloadAllDocuments() override;
 
+	// ---- Editor designer support ----
+	// LOGIC thread only: the Rml::Context is touched by Update() on the logic
+	// thread anyway; the editor runs Single-thread mode where this is exact.
+	String PickElementAt(Int x, Int y) override;
+	Bool GetElementBox(const String& id, Float32& x, Float32& y,
+		Float32& w, Float32& h) override;
+	void SetElementBoxTransient(const String& id, Float32 x, Float32 y,
+		Float32 w, Float32 h) override;
+
 protected:
 private:
 	void METHOD(SetupInterfaces)();

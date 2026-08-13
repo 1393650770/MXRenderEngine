@@ -29,7 +29,11 @@ public:
 
 	bool LogMessage(Rml::Log::Type type, const Rml::String& message) override
 	{
-		if (capturing_log && (type == Rml::Log::LT_ERROR || type == Rml::Log::LT_WARNING))
+		// Only hard errors abort a hot-reload swap: RmlUi reports recoverable
+		// content issues (missing data-model variable, unresolved font face)
+		// as WARNING, and the tolerant XML parser still yields a document for
+		// those — aborting on them would reject perfectly loadable documents.
+		if (capturing_log && type == Rml::Log::LT_ERROR)
 			++log_warning_count;
 
 		// Route RmlUI logs to std::cout (matches project convention)

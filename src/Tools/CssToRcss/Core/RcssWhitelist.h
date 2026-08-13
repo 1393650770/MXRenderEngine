@@ -3,6 +3,7 @@
 #define _RCSS_WHITELIST_
 
 #include <string>
+#include <vector>
 
 namespace MXRender::Tool::CssToRcss {
 
@@ -35,6 +36,9 @@ class RcssWhitelist
 public:
 	/// nullptr if the property is unknown to RmlUi.
 	static const RcssPropertySpec* Find(const std::string& lower_name);
+
+	/// Full whitelist — drives the editor's "add property" picker.
+	static const std::vector<RcssPropertySpec>& All();
 
 	/// Case-insensitive keyword check (value must be lowercased first).
 	static bool IsKeywordValid(const RcssPropertySpec& spec, const std::string& lower_value);

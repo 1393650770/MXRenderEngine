@@ -24,7 +24,6 @@
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Application)
 
-
 Vector<UInt32> ReadShader(CONST String& filename)
 {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -111,7 +110,6 @@ void EditorRenderPipeline::OnInit_Render()
 			in_cmd_list->ClearTexture(dsv);
 
 	});
-
 
 	struct TestData :public  Render::RenderGraphPassDataBase
 	{
@@ -239,8 +237,11 @@ void EditorRenderPipeline::OnInit_Render()
 	// --  Register fallback shaders for loaded graph passes
 	InitRenderPasses();
 
-	// --  UI preview pass survives graph rebuilds (added again in RebuildFromDefinition)
+	// --  UI preview pass survives graph rebuilds (added again in RebuildFromDefinition).
+	// Add it BEFORE Compile — a pass added after Compile never lands in the
+	// execution steps and the preview canvas stays black.
 	EnsureUIPreviewPass(graph);
+	graph.Compile();
 }
 
 // -- 
@@ -292,8 +293,6 @@ void EditorRenderPipeline::InitRenderPasses()
 		});
 }
 
-
-
 void EditorRenderPipeline::RebuildFromDefinition(CONST MXRender::Render::RenderGraphDefinition& def)
 {
 	if (!m_window) return;
@@ -344,7 +343,9 @@ void EditorRenderPipeline::RebuildFromDefinition(CONST MXRender::Render::RenderG
 		if (auto* rgp = editor_ui.GetRenderGraphPanel()) rgp->SyncRuntimeToEditor(&graph);
 	}
 	// UI preview pass is not part of any definition — re-add after rebuild.
+	// Add BEFORE Compile (see OnInit_Render) so it lands in the steps.
 	EnsureUIPreviewPass(graph);
+	graph.Compile();
 }
 
 void EditorRenderPipeline::EnsureUIPreviewPass(Render::RenderGraph& graph)

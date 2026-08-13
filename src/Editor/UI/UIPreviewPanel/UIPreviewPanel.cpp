@@ -11,6 +11,7 @@
 #include "UI/UIDocumentModel/RmlParser.h"
 #include "UI/UIDocumentModel/UIRcssParser.h"
 #include "UI/UIDocumentModel/UIDocumentSerializer.h"
+#include "UI/UIDesigner/UIPalette.h"
 
 #include "Render/Core/CommandQueue.h"
 #include "RHI/RenderRHI.h"
@@ -24,7 +25,7 @@
 #include "EditorRender/EditorUI.h"
 
 #include <imgui.h>
-#include <filesystem>
+#include <cmath>
 #include <iostream>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
@@ -56,6 +57,7 @@ void UIPreviewPanel::Init()
 	// Host viewport is the Editor's swapchain viewport — only used as a
 	// texture-format source on the render thread.
 	m_host_viewport = s_host_viewport;   // wired by EditorUI::Init before AddPanelUI
+	UIDesignerState::SetInstance(&m_designer);
 	m_preview_viewport = new UI::PreviewViewport();
 
 	// Seed the preview document from the demo panel (round-trip: parse →
@@ -107,12 +109,24 @@ void UIPreviewPanel::Update()
 	if (!m_ready.load()) return;
 	if (!UIManager::Get().GetRenderer()) return;   // destroyed
 
+	// Designer document state (parse the current __preview__ files once) and
+	// drain the undo/redo command queue.
+	UIDesignerState::Get().EnsureLoaded();
+	UIDesignerState::Get().Tick();
+
 	// First ready frame: bind the preview data model + load the document.
 	// Manual binding via the abstract UIDataModelBinder (MetaParser does not
 	// scan src/Editor; the 3c binding registry will formalize this).
 	if (!m_doc_shown)
 	{
 		m_doc_shown = true;
+		// The preview document uses the demo panel's font — without it every
+		// element logs "No font face defined" during LoadDocument, which the
+		// hot-reload log capture counts as a parse failure and aborts reloads.
+		UIManager::Get().LoadFont(
+			"Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-latin.ttf");
+		UIManager::Get().LoadFont(
+			"Font/ark-pixel-font-10px-monospaced-ttf-v2026.07.20/ark-pixel-10px-monospaced-zh_cn.ttf");
 		m_model = UIManager::Get().CreateDataModel("preview");
 		if (m_model.IsValid())
 		{
@@ -150,21 +164,239 @@ void UIPreviewPanel::Update()
 
 void UIPreviewPanel::Draw()
 {
+	// The preview canvas is a fixed 640x480 image — keep the panel FLOATING
+	// and parked left, with the designer panels (palette/property) to its
+	// right. (A stale ini DockId keeps docking the panel into the DockSpace
+	// where SetWindowSize is ignored — detach it explicitly; SetNextWindow*
+	// calls MUST precede Begin.)
+	static bool s_placed = false;
+	if (!s_placed)
+	{
+		ImGui::SetNextWindowPos(ImVec2(60, 100), ImGuiCond_Always);
+		s_placed = true;
+	}
+	ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+
 	if (!OnBegin(ImGuiWindowFlags_NoCollapse))
 		return;
 
+	// Floating (undocked) — pin the size directly after Begin.
+	ImGui::SetWindowSize(ImVec2(680, 560));
+
 	if (m_ready.load() && m_color_tex)
 	{
-		ImGui::Text("Live RmlUi preview — F8 toggles the debugger");
+		ImGui::Text("Live RmlUi preview — LMB select/move, Alt = native input, F8 debugger");
+		const ImVec2 canvas_min = ImGui::GetCursorScreenPos();
 		ImGui::Image(MXRender::Application::EditorUI::GetPreviewTextureId(m_color_tex),
 			ImVec2(640, 480));
-		ForwardInput();
+		DrawCanvasInteraction(canvas_min);
+		ForwardInput(canvas_min);
 	}
 	else
 	{
 		ImGui::Text("Initializing preview...");
 	}
 	OnEnd();
+}
+
+// =========================================================================
+// Designer canvas: selection / move / resize / palette drop
+//
+// Edit mode (no modifier): LMB picks (PickElementAt → id of the element or
+// its nearest id'd ancestor), drag moves, corner/edge handles resize — all
+// transient (inline-style overlays that vanish on reload), committed into the
+// #id rule by ONE snapshot command at release. Alt = raw RmlUi interaction
+// pass-through (buttons, sliders work normally).
+// =========================================================================
+
+void UIPreviewPanel::DrawCanvasInteraction(const ImVec2& canvas_min)
+{
+	auto& ds = UIDesignerState::Get();
+	if (!ds.IsLoaded()) return;
+
+	ImGuiIO& io = ImGui::GetIO();
+	const ImVec2 canvas_max = canvas_min + ImVec2(640.0f, 480.0f);
+	const bool hovered = ImGui::IsWindowHovered()
+		&& ImGui::IsMouseHoveringRect(canvas_min, canvas_max);
+	const bool native = io.KeyAlt;   // Alt = raw RmlUi interaction
+
+	if (hovered && !native)
+	{
+		const float px = io.MousePos.x - canvas_min.x;
+		const float py = io.MousePos.y - canvas_min.y;
+
+		if (io.MouseClicked[0])
+		{
+			// 1. resize handle on the current selection?
+			const String& sel = ds.GetSelection();
+			UIDesignerState::Box box;
+			if (!sel.empty() && UIManager::Get().GetElementBox(sel, box.x, box.y, box.w, box.h))
+			{
+				const int h = HitTestHandle(box, px, py);
+				if (h >= 0)
+				{
+					m_drag_mode = EDragMode::Resize;
+					m_resize_handle = h;
+					m_drag_start_x = px; m_drag_start_y = py;
+					m_drag_orig = box;
+				}
+			}
+			// 2. pick + prepare move (only if a handle wasn't grabbed)
+			if (m_drag_mode == EDragMode::None)
+			{
+				const String hit = UIManager::Get().PickElementAt((int)px, (int)py);
+				if (hit != sel)
+					ds.Select(hit);
+				if (!hit.empty())
+				{
+					UIDesignerState::Box hbox;
+					if (UIManager::Get().GetElementBox(hit, hbox.x, hbox.y, hbox.w, hbox.h))
+					{
+						m_drag_mode = EDragMode::Move;   // activates past the threshold
+						m_drag_start_x = px; m_drag_start_y = py;
+						m_drag_orig = hbox;
+					}
+				}
+			}
+		}
+		else if (io.MouseDown[0] && m_drag_mode != EDragMode::None)
+		{
+			const float dx = px - m_drag_start_x;
+			const float dy = py - m_drag_start_y;
+			if (!m_drag_active && (fabsf(dx) > 4.0f || fabsf(dy) > 4.0f))
+				m_drag_active = true;
+			if (m_drag_active)
+			{
+				const String& sel = ds.GetSelection();
+				if (!sel.empty())
+				{
+					if (m_drag_mode == EDragMode::Move)
+					{
+						// Transient overlay — vanished by the reload on release.
+						UIManager::Get().SetElementBoxTransient(sel,
+							m_drag_orig.x + dx, m_drag_orig.y + dy,
+							m_drag_orig.w, m_drag_orig.h);
+					}
+					else
+					{
+						UIDesignerState::Box nb = m_drag_orig;
+						ResizeByHandle(nb, m_resize_handle, dx, dy);
+						UIManager::Get().SetElementBoxTransient(sel,
+							nb.x, nb.y, nb.w, nb.h);
+					}
+				}
+			}
+		}
+		if (io.MouseReleased[0] && m_drag_mode != EDragMode::None)
+		{
+			// Commit ONE undoable box change (SetBoxCmd → #id rule → reload).
+			if (m_drag_active)
+			{
+				const String& sel = ds.GetSelection();
+				UIDesignerState::Box nb;
+				if (!sel.empty() && UIManager::Get().GetElementBox(sel, nb.x, nb.y, nb.w, nb.h))
+					ds.SetBoxUndoable(sel, m_drag_orig, nb);
+			}
+			m_drag_mode = EDragMode::None;
+			m_drag_active = false;
+			m_resize_handle = -1;
+		}
+	}
+	else if (!io.MouseDown[0] && m_drag_mode != EDragMode::None)
+	{
+		// left the canvas / native mode with the button up — cancel the drag
+		m_drag_mode = EDragMode::None;
+		m_drag_active = false;
+		m_resize_handle = -1;
+	}
+
+	// ---- palette drag-drop insert ----
+	if (hovered && !native && ImGui::BeginDragDropTarget())
+	{
+		if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(UIPalettePanel::kDragPayload))
+		{
+			if (const UIWidgetTemplate* tpl = UIPalettePanel::FindTemplate(
+				String((const char*)payload->Data)))
+			{
+				const float px = io.MousePos.x - canvas_min.x;
+				const float py = io.MousePos.y - canvas_min.y;
+				ds.InsertNodeUndoable(*tpl, "", px, py);
+			}
+		}
+		ImGui::EndDragDropTarget();
+	}
+
+	// ---- selection overlay (box + resize handles) ----
+	const String& sel = ds.GetSelection();
+	UIDesignerState::Box box;
+	if (!sel.empty() && UIManager::Get().GetElementBox(sel, box.x, box.y, box.w, box.h))
+		DrawSelectionOverlay(canvas_min, ImGui::GetWindowDrawList());
+
+	// Undo/redo while the canvas is hovered.
+	if (hovered && !native)
+		ds.HandleUndoRedoKeys();
+}
+
+void UIPreviewPanel::DrawSelectionOverlay(const ImVec2& canvas_min, ImDrawList* dl)
+{
+	auto& ds = UIDesignerState::Get();
+	UIDesignerState::Box box;
+	if (!UIManager::Get().GetElementBox(ds.GetSelection(), box.x, box.y, box.w, box.h))
+		return;
+
+	const ImVec2 bmin = canvas_min + ImVec2(box.x, box.y);
+	const ImVec2 bmax = bmin + ImVec2(box.w, box.h);
+	dl->AddRect(bmin, bmax, IM_COL32(255, 255, 255, 230), 0.0f, 0, 1.5f);
+	const ImU32 handle_col = IM_COL32(64, 160, 255, 255);
+	const float hs = 3.5f;
+	const ImVec2 corners[4] = { bmin, { bmax.x, bmin.y }, bmax, { bmin.x, bmax.y } };
+	for (int i = 0; i < 4; ++i)
+		dl->AddRectFilled(corners[i] - ImVec2(hs, hs), corners[i] + ImVec2(hs, hs), handle_col);
+	const ImVec2 mids[4] = {
+		(corners[0] + corners[1]) * 0.5f, (corners[1] + corners[2]) * 0.5f,
+		(corners[2] + corners[3]) * 0.5f, (corners[3] + corners[0]) * 0.5f };
+	for (int i = 0; i < 4; ++i)
+		dl->AddRectFilled(mids[i] - ImVec2(2.5f, 2.5f), mids[i] + ImVec2(2.5f, 2.5f), handle_col);
+}
+
+int UIPreviewPanel::HitTestHandle(const UIDesignerState::Box& box, float px, float py)
+{
+	const float c = 8.0f;   // corner hit radius
+	const float e = 5.0f;   // edge hit radius
+	const ImVec2 pts[4] = {
+		{ box.x, box.y }, { box.x + box.w, box.y },
+		{ box.x + box.w, box.y + box.h }, { box.x, box.y + box.h } };
+	for (int i = 0; i < 4; ++i)
+		if (fabsf(px - pts[i].x) <= c && fabsf(py - pts[i].y) <= c)
+			return i * 2;   // corner handles: 0, 2, 4, 6
+	struct { ImVec2 a, b; int idx; } edges[4] = {
+		{ pts[0], pts[1], 1 }, { pts[1], pts[2], 3 },
+		{ pts[2], pts[3], 5 }, { pts[3], pts[0], 7 } };
+	for (const auto& ed : edges)
+	{
+		const ImVec2 mid = (ed.a + ed.b) * 0.5f;
+		if (fabsf(px - mid.x) <= e && fabsf(py - mid.y) <= e)
+			return ed.idx;
+	}
+	return -1;
+}
+
+void UIPreviewPanel::ResizeByHandle(UIDesignerState::Box& box, int handle, float dx, float dy)
+{
+	const float min = 8.0f;
+	switch (handle)
+	{
+	case 0: box.x += dx; box.w -= dx; box.y += dy; box.h -= dy; break;   // top-left
+	case 1: box.y += dy; box.h -= dy; break;                            // top
+	case 2: box.w += dx; box.y += dy; box.h -= dy; break;               // top-right
+	case 3: box.w += dx; break;                                         // right
+	case 4: box.w += dx; box.h += dy; break;                            // bottom-right
+	case 5: box.h += dy; break;                                         // bottom
+	case 6: box.x += dx; box.w -= dx; box.h += dy; break;               // bottom-left
+	case 7: box.x += dx; box.w -= dx; break;                            // left
+	}
+	if (box.w < min) { box.x -= (min - box.w); box.w = min; }
+	if (box.h < min) { box.y -= (min - box.h); box.h = min; }
 }
 
 void UIPreviewPanel::Release()
@@ -217,27 +449,6 @@ void UIPreviewPanel::SetHostViewport(RHI::Viewport* viewport)
 // Preview document seeding
 // =========================================================================
 
-namespace
-{
-/// Walks up from cwd looking for a directory containing resource/RmlUI.
-/// (The editor runs with cwd = build output; sources live in the repo.)
-String FindProjectRoot()
-{
-	std::error_code ec;
-	auto dir = std::filesystem::current_path(ec);
-	if (ec) return "";
-	for (int i = 0; i < 8; ++i)
-	{
-		if (std::filesystem::is_directory(dir / "resource" / "RmlUI", ec))
-			return dir.string();
-		ec.clear();
-		dir = dir.parent_path();
-		if (dir.empty()) break;
-	}
-	return "";
-}
-} // namespace
-
 void UIPreviewPanel::EnsurePreviewFiles()
 {
 	// Parse the demo panel from the project source, serialize through the IR
@@ -258,6 +469,12 @@ void UIPreviewPanel::EnsurePreviewFiles()
 		doc.stylesheets.clear();
 		doc.stylesheets.push_back("__preview__.rcss");
 		doc.file_path = out_rml;
+		// Re-point the data model to the preview's own ("preview") — the demo
+		// panel's "hud" doesn't exist here, and RmlUi logs an Error during
+		// LoadDocument that the hot-reload log capture counts as a failure.
+		for (auto& a : doc.body_attributes)
+			if (a.name == "data-model")
+				a.value = "preview";
 		String serialized = UIDocumentSerializer::SerializeRml(doc);
 		Vector<UInt8> bytes(serialized.begin(), serialized.end());
 		Platform::PlatformFile::WriteFileAtomic(out_rml, bytes);
@@ -281,7 +498,7 @@ void UIPreviewPanel::EnsurePreviewFiles()
 // panel is hovered and not consuming)
 // =========================================================================
 
-void UIPreviewPanel::ForwardInput()
+void UIPreviewPanel::ForwardInput(const ImVec2& canvas_min)
 {
 	ImGuiIO& io = ImGui::GetIO();
 	auto* bridge = UIManager::Get().GetInputBridge();
@@ -299,23 +516,27 @@ void UIPreviewPanel::ForwardInput()
 
 	const bool hovered = ImGui::IsWindowHovered();
 	const bool mouse_free = hovered && !io.WantCaptureMouse;
+	const bool native = io.KeyAlt;        // Alt = raw RmlUi interaction (no canvas editing)
+	const bool editing = m_drag_active;   // LMB owned by the canvas
 
-	// Mouse position relative to the preview surface.
-	if (mouse_free)
+	// Mouse position relative to the preview surface (canvas-local = the
+	// RmlUi viewport's 640x480 space).
+	if (mouse_free && !editing)
 	{
-		ImVec2 origin = ImGui::GetWindowPos();
-		bridge->ProcessMouseMove((Int)(io.MousePos.x - origin.x), (Int)(io.MousePos.y - origin.y));
+		bridge->ProcessMouseMove((Int)(io.MousePos.x - canvas_min.x),
+			(Int)(io.MousePos.y - canvas_min.y));
 	}
 	for (int b = 0; b < 3; ++b)
 	{
-		bool down = mouse_free && io.MouseDown[b];
+		const bool block = editing && b == 0;
+		bool down = mouse_free && !block && io.MouseDown[b];
 		if (down != m_mouse_down[b])
 		{
 			bridge->ProcessMouseButton(b, down);
 			m_mouse_down[b] = down;
 		}
 	}
-	if (mouse_free && io.MouseWheel != 0.0f)
+	if (mouse_free && !editing && io.MouseWheel != 0.0f)
 	{
 		bridge->ProcessMouseScroll(0.0f, io.MouseWheel);
 		io.MouseWheel = 0.0f;

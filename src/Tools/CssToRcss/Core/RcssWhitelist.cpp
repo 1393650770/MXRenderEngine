@@ -1,6 +1,7 @@
 #include "RcssWhitelist.h"
 
 #include <cstring>
+#include <iterator>
 #include <vector>
 
 namespace MXRender::Tool::CssToRcss {
@@ -172,6 +173,12 @@ const RcssPropertySpec* RcssWhitelist::Find(const std::string& lower_name)
 		if (lower_name == spec.name)
 			return &spec;
 	return nullptr;
+}
+
+const std::vector<RcssPropertySpec>& RcssWhitelist::All()
+{
+	static const std::vector<RcssPropertySpec> kAll(std::begin(kSpecs), std::end(kSpecs));
+	return kAll;
 }
 
 bool RcssWhitelist::IsKeywordValid(const RcssPropertySpec& spec, const std::string& lower_value)

@@ -174,5 +174,22 @@ void UIManager::ReloadAllDocuments()
 	if (m_backend) m_backend->ReloadAllDocuments();
 }
 
+String UIManager::PickElementAt(Int x, Int y)
+{
+	if (!m_backend) return {};
+	return m_backend->PickElementAt(x, y);
+}
+
+Bool UIManager::GetElementBox(const String& id, Float32& x, Float32& y, Float32& w, Float32& h)
+{
+	if (!m_backend) return false;
+	return m_backend->GetElementBox(id, x, y, w, h);
+}
+
+void UIManager::SetElementBoxTransient(const String& id, Float32 x, Float32 y, Float32 w, Float32 h)
+{
+	if (m_backend) m_backend->SetElementBoxTransient(id, x, y, w, h);
+}
+
 MYRENDERER_END_NAMESPACE // UI
 MYRENDERER_END_NAMESPACE // MXRender

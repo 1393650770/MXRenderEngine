@@ -12,6 +12,7 @@
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/Element.h>
 #include <RmlUi/Debugger.h>
 
 #include "RHI/RenderViewport.h"
@@ -441,6 +442,68 @@ void RmlUISystem::ReloadAllDocuments()
 				changes.rml_changed_paths.push_back(entry.second.path);
 		ApplyHotReload(changes);
 	});
+}
+
+// =========================================================================
+// Editor designer support (WYSIWYG overlay)
+// =========================================================================
+
+String RmlUISystem::PickElementAt(Int x, Int y)
+{
+	auto* ctx = m_context;
+	if (!ctx) return {};
+	::Rml::Element* el = ctx->GetElementAtPoint(::Rml::Vector2f((float)x, (float)y));
+	for (; el; el = el->GetParentNode())
+	{
+		const ::Rml::String& id = el->GetId();
+		if (!id.empty())
+			return String(id.c_str());
+	}
+	return {};
+}
+
+namespace
+{
+/// Context-wide element lookup: the context root wraps every open document.
+::Rml::Element* FindElementById(::Rml::Context* ctx, const String& id)
+{
+	if (!ctx) return nullptr;
+	::Rml::Element* root = ctx->GetRootElement();
+	return root ? root->GetElementById(id) : nullptr;
+}
+} // namespace
+
+Bool RmlUISystem::GetElementBox(const String& id, Float32& x, Float32& y,
+	Float32& w, Float32& h)
+{
+	auto* ctx = m_context;
+	if (!ctx) return false;
+	::Rml::Element* el = FindElementById(ctx, id);
+	if (!el) return false;
+	x = el->GetAbsoluteLeft();
+	y = el->GetAbsoluteTop();
+	::Rml::Vector2f size = el->GetBox().GetSize();
+	w = size.x;
+	h = size.y;
+	return true;
+}
+
+void RmlUISystem::SetElementBoxTransient(const String& id, Float32 x, Float32 y,
+	Float32 w, Float32 h)
+{
+	auto* ctx = m_context;
+	if (!ctx) return;
+	::Rml::Element* el = FindElementById(ctx, id);
+	if (!el) return;
+	// Inline style overlay — NOT re-read by hot reload, so drag previews
+	// vanish on reload. The designer commits boxes into #id rules instead.
+	el->SetProperty("position", ::Rml::String("absolute"));
+	el->SetProperty("left", ::Rml::String(std::to_string((int)x) + "px"));
+	el->SetProperty("top", ::Rml::String(std::to_string((int)y) + "px"));
+	if (w > 0.0f)
+		el->SetProperty("width", ::Rml::String(std::to_string((int)w) + "px"));
+	if (h > 0.0f)
+		el->SetProperty("height", ::Rml::String(std::to_string((int)h) + "px"));
 }
 
 // =========================================================================
