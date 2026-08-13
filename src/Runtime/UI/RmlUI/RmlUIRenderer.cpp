@@ -289,7 +289,6 @@ UITextureHandle RmlUIRenderer::CreateTexture(CONST void* pixel_data, UInt32 w, U
 			if (slot.srb)
 			{
 				slot.srb->SetResource("tex", slot.texture);
-				slot.srb->SetResource("pc", m_per_draw_buf);
 				slot.srb->FlushDescriptorWrites();
 			}
 		}
@@ -457,7 +456,12 @@ void RmlUIRenderer::UploadPerDrawData()
 	data.translation[0] = m_translation[0];
 	data.translation[1] = m_translation[1];
 
-	Tool::BufferUtils::Upload(m_per_draw_buf, &data, sizeof(data));
+	// Push constants: recorded INLINE in the command stream per draw, so every
+	// geometry gets its own transform/translation even under deferred GPU
+	// execution (a single shared dynamic buffer would serve the LAST upload to
+	// all draws — the per-geometry translation collapse bug).
+	if (m_current_cmd)
+		m_current_cmd->SetPushConstants(0, sizeof(data), &data, ENUM_SHADER_STAGE::Shader_Vertex);
 }
 
 // =========================================================================
@@ -565,7 +569,6 @@ void RmlUIRenderer::CreatePSOs()
 			m_pso_textured->CreateShaderResourceBinding(m_srb_untextured, false);
 			if (m_srb_untextured)
 			{
-				m_srb_untextured->SetResource("pc", m_per_draw_buf);
 				m_srb_untextured->FlushDescriptorWrites();
 			}
 			// Bind a 1x1 white dummy texture so the descriptor is never uninitialized

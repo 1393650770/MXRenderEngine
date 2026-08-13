@@ -9,8 +9,10 @@ layout(location = 2) in vec2 inTexCoord;
 layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec2 fragTexCoord;
 
-// Storage buffer for per-draw data (mat4 + vec2 = 72 bytes)
-layout(std430, set = 0, binding = 1) readonly buffer PerDraw {
+// Per-draw data via push constants (mat4 + vec2 = 72 bytes).
+// Push constants are recorded per-draw in the command stream, so every
+// geometry gets its OWN transform/translation even under deferred execution.
+layout(push_constant) uniform PerDraw {
     mat4 transform;
     vec2 translation;
 } pc;
