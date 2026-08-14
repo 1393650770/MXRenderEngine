@@ -195,7 +195,6 @@ void RmlUIRenderer::DrawGeometry(UIGeometryHandle geo, CONST void* transform, UI
 		memcpy(m_transform, transform, sizeof(float) * 16);
 	}
 	// m_translation is set by caller (RmlUIRenderInterface passes per-geometry translation)
-
 	bool has_texture = (tex.value != 0);
 	RHI::RenderPipelineState* pso = SelectPSO(has_texture);
 	if (!pso) return;
@@ -380,6 +379,23 @@ void RmlUIRenderer::RenderToClipMask(Int operation, UIGeometryHandle geo, CONST 
 // =========================================================================
 void RmlUIRenderer::SetTransform(CONST void* transform)
 {
+	// TEMP probe: transform applied by RmlUi
+	{
+		static int dbg = 0;
+		if (++dbg <= 10)
+		{
+			if (transform)
+			{
+				const float* m = (const float*)transform;
+				std::cerr << "[RmlUI] SetTransform tx=" << m[12] << " ty=" << m[13]
+					<< " sx=" << m[0] << std::endl;
+			}
+			else
+			{
+				std::cerr << "[RmlUI] SetTransform(identity)" << std::endl;
+			}
+		}
+	}
 	if (transform)
 	{
 		memcpy(m_transform, transform, sizeof(float) * 16);

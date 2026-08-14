@@ -9,29 +9,48 @@ namespace {
 
 using namespace MXRender::Tool::CssToRcss;
 
-String JoinSelector(const std::vector<CssToken>& selector)
+/// Joins tokens with single spaces EXCEPT inside function parentheses —
+/// `translateX(-50%)` must stay `translateX(-50%)`, not `translateX( -50% )`
+/// (RmlUi's transform parser rejects the spaced form).
+String JoinTokens(const std::vector<CssToken>& tokens)
 {
 	String out;
-	for (const auto& t : selector)
+	int paren_depth = 0;
+	for (const auto& t : tokens)
 	{
-		if (t.kind == ETokenKind::Function) { out += t.text; out += '('; continue; }
-		if (t.kind == ETokenKind::RParen) { out += ')'; continue; }
-		if (!out.empty() && t.kind != ETokenKind::Comma) out += ' ';
+		if (t.kind == ETokenKind::Function)
+		{
+			if (!out.empty() && paren_depth == 0) out += ' ';
+			out += t.text;
+			out += '(';
+			++paren_depth;
+			continue;
+		}
+		if (t.kind == ETokenKind::RParen)
+		{
+			out += ')';
+			if (paren_depth > 0) --paren_depth;
+			continue;
+		}
+		if (t.kind == ETokenKind::Comma)
+		{
+			out += ',';
+			continue;
+		}
+		if (!out.empty() && paren_depth == 0) out += ' ';
 		out += t.text;
 	}
 	return out;
 }
 
+String JoinSelector(const std::vector<CssToken>& selector)
+{
+	return JoinTokens(selector);
+}
+
 String RenderValue(const std::vector<CssToken>& value)
 {
-	String out;
-	for (const auto& t : value)
-	{
-		if (!out.empty()) out += ' ';
-		if (t.kind == ETokenKind::Function) { out += t.text; out += '('; }
-		else { out += t.text; }
-	}
-	return out;
+	return JoinTokens(value);
 }
 
 EAtRuleKind MapAtRuleKind(const String& name)

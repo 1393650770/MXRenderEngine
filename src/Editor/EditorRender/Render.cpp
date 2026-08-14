@@ -244,7 +244,7 @@ void EditorRenderPipeline::OnInit_Render()
 	graph.Compile();
 }
 
-// -- 
+// --
 void EditorRenderPipeline::InitRenderPasses()
 {
 	// ---- Skybox pipeline ----
