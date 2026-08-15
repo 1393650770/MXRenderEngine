@@ -186,6 +186,12 @@ Bool UIManager::GetElementBox(const String& id, Float32& x, Float32& y, Float32&
 	return m_backend->GetElementBox(id, x, y, w, h);
 }
 
+Bool UIManager::GetElementTransform(const String& id, Float32& tx, Float32& ty)
+{
+	if (!m_backend) return false;
+	return m_backend->GetElementTransform(id, tx, ty);
+}
+
 void UIManager::SetElementBoxTransient(const String& id, Float32 x, Float32 y, Float32 w, Float32 h)
 {
 	if (m_backend) m_backend->SetElementBoxTransient(id, x, y, w, h);

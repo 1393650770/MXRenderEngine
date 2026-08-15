@@ -13,6 +13,7 @@
 #include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/Element.h>
+#include "RmlUi/Source/Core/TransformState.h"   // GetTransformState() accessor (internal header)
 #include <RmlUi/Debugger.h>
 
 #include "RHI/RenderViewport.h"
@@ -473,6 +474,21 @@ namespace
 }
 } // namespace
 
+Bool RmlUISystem::GetElementTransform(const String& id, Float32& tx, Float32& ty)
+{
+	auto* ctx = m_context;
+	if (!ctx) return false;
+	::Rml::Element* el = FindElementById(ctx, id);
+	if (!el) return false;
+	const ::Rml::TransformState* ts = el->GetTransformState();
+	if (!ts) return false;
+	const ::Rml::Matrix4f* m = ts->GetTransform();
+	if (!m) return false;
+	tx = (*m)[3][0];   // column-major: translation lives in the last column
+	ty = (*m)[3][1];
+	return true;
+}
+
 Bool RmlUISystem::GetElementBox(const String& id, Float32& x, Float32& y,
 	Float32& w, Float32& h)
 {
@@ -485,6 +501,16 @@ Bool RmlUISystem::GetElementBox(const String& id, Float32& x, Float32& y,
 	::Rml::Vector2f size = el->GetBox().GetSize();
 	w = size.x;
 	h = size.y;
+	// RmlUi transforms are RENDER-only: GetAbsoluteLeft/Top are layout coords
+	// and ignore translateX etc. Fold the translation in so the box tracks
+	// what the user SEES (the selection overlay would otherwise sit half a
+	// box-width off for `translateX(-50%)`-style elements).
+	if (const ::Rml::TransformState* ts = el->GetTransformState())
+		if (const ::Rml::Matrix4f* m = ts->GetTransform())
+		{
+			x += (*m)[3][0];
+			y += (*m)[3][1];
+		}
 	return true;
 }
 
@@ -497,9 +523,19 @@ void RmlUISystem::SetElementBoxTransient(const String& id, Float32 x, Float32 y,
 	if (!el) return;
 	// Inline style overlay — NOT re-read by hot reload, so drag previews
 	// vanish on reload. The designer commits boxes into #id rules instead.
+	// The args are RENDERED coords (GetElementBox contract); left/top are
+	// LAYOUT values, so subtract the transform translation back out —
+	// otherwise a translated element visibly jumps on first drag frame.
+	Float32 tx = 0.0f, ty = 0.0f;
+	if (const ::Rml::TransformState* ts = el->GetTransformState())
+		if (const ::Rml::Matrix4f* m = ts->GetTransform())
+		{
+			tx = (*m)[3][0];
+			ty = (*m)[3][1];
+		}
 	el->SetProperty("position", ::Rml::String("absolute"));
-	el->SetProperty("left", ::Rml::String(std::to_string((int)x) + "px"));
-	el->SetProperty("top", ::Rml::String(std::to_string((int)y) + "px"));
+	el->SetProperty("left", ::Rml::String(std::to_string((int)(x - tx)) + "px"));
+	el->SetProperty("top", ::Rml::String(std::to_string((int)(y - ty)) + "px"));
 	if (w > 0.0f)
 		el->SetProperty("width", ::Rml::String(std::to_string((int)w) + "px"));
 	if (h > 0.0f)

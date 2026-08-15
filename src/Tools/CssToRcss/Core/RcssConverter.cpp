@@ -1,5 +1,6 @@
 #include "RcssConverter.h"
 #include "RcssWhitelist.h"
+#include "RcssEmitter.h"   // shared JoinTokens (bracket/colon/paren-aware)
 
 #include <algorithm>
 #include <cctype>
@@ -15,17 +16,6 @@ std::string Lower(std::string s)
 	std::transform(s.begin(), s.end(), s.begin(),
 		[](unsigned char c) { return (char)std::tolower(c); });
 	return s;
-}
-
-std::string JoinTokens(const std::vector<CssToken>& tokens)
-{
-	std::string out;
-	for (const auto& t : tokens)
-	{
-		if (!out.empty()) out += ' ';
-		out += t.text;
-	}
-	return out;
 }
 
 bool IsHexDigit(char c)
@@ -183,23 +173,6 @@ bool IsLength(const std::string& text, bool allow_percent, bool allow_bare)
 	return IsSupportedUnit(unit);
 }
 
-/// Value tokens → normalized text (single spaces, functions rendered as name(...)).
-std::string RenderValue(const std::vector<CssToken>& value)
-{
-	std::string out;
-	bool expect_paren = false;
-	for (const auto& t : value)
-	{
-		if (!out.empty() && !expect_paren) out += ' ';
-		expect_paren = false;
-		if (t.kind == ETokenKind::Function) { out += t.text; out += '('; expect_paren = true; }
-		else if (t.kind == ETokenKind::RParen) { out += ')'; }
-		else if (t.kind == ETokenKind::Comma) { out += ','; }
-		else { out += t.text; }
-	}
-	return out;
-}
-
 } // namespace
 
 // =========================================================================
@@ -266,13 +239,13 @@ bool RcssConverter::IsRejected(const CssDeclaration& decl, Ctx& ctx, std::string
 	{ reason = "CSS Grid is not supported by RmlUi"; return true; }
 	if (p == "display")
 	{
-		const std::string v = Lower(RenderValue(decl.value));
+		const std::string v = Lower(JoinTokens(decl.value));
 		if (v == "grid" || v == "inline-grid")
 		{ reason = "display:grid is not supported by RmlUi (use flex)"; return true; }
 	}
 	if (p == "position")
 	{
-		const std::string v = Lower(RenderValue(decl.value));
+		const std::string v = Lower(JoinTokens(decl.value));
 		if (v == "sticky") { reason = "position:sticky is not supported by RmlUi"; return true; }
 	}
 	// Images — RmlUi uses decorator: instead
@@ -391,7 +364,7 @@ bool RcssConverter::ConvertDeclaration(CssDeclaration& decl, Ctx& ctx,
 	switch (spec->family)
 	{
 	case EValueFamily::Keyword:
-		return drop("invalid value '" + RenderValue(decl.value) + "' — expected one of: "
+		return drop("invalid value '" + JoinTokens(decl.value) + "' — expected one of: "
 			+ (spec->keywords[0] ? spec->keywords : ""));
 	case EValueFamily::Color:
 	{
@@ -405,7 +378,7 @@ bool RcssConverter::ConvertDeclaration(CssDeclaration& decl, Ctx& ctx,
 	case EValueFamily::NumberLengthPercent:
 	{
 		if (decl.value.size() != 1 || decl.value[0].kind != ETokenKind::Number)
-			return drop("invalid value '" + RenderValue(decl.value) + "'");
+			return drop("invalid value '" + JoinTokens(decl.value) + "'");
 		const std::string text = decl.value[0].text;
 		const bool ok = (spec->family == EValueFamily::Number) ? IsBareNumber(text)
 			: IsLength(text, spec->family == EValueFamily::LengthPercent || spec->family == EValueFamily::NumberLengthPercent,

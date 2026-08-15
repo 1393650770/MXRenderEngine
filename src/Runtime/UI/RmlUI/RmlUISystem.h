@@ -86,6 +86,7 @@ public:
 	String PickElementAt(Int x, Int y) override;
 	Bool GetElementBox(const String& id, Float32& x, Float32& y,
 		Float32& w, Float32& h) override;
+	Bool GetElementTransform(const String& id, Float32& tx, Float32& ty) override;
 	void SetElementBoxTransient(const String& id, Float32 x, Float32 y,
 		Float32 w, Float32 h) override;
 

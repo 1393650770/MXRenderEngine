@@ -69,6 +69,15 @@ String RGBAtoHex(const float c[4])
 	return buf;
 }
 
+/// std::to_string(50.0f) → "50.000000" — six decimals leaking into RCSS
+/// ("top: 50.000000px"). %g renders the shortest decimal form: "50", "12.5".
+String FormatFloat(float v)
+{
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%g", v);
+	return buf;
+}
+
 /// "12px" / "12.5dp" / "12%" → (12, "px"); false for keywords like "auto".
 bool ParseLength(const String& value, float& out_num, String& out_unit)
 {
@@ -105,17 +114,8 @@ Vector<String> SplitKeywords(const String& kws)
 
 void UIPropertyPanel::Draw()
 {
-	// Park below the palette, right of the preview canvas (its default spot
-	// at 60,60 overlaps the canvas and eats its hover/click). Always-cond:
-	// Once would honor the stale ini position and never move it.
-	static bool s_placed = false;
-	if (!s_placed)
-	{
-		ImGui::SetNextWindowPos(ImVec2(760, 560), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(380, 400), ImGuiCond_Always);
-		s_placed = true;
-	}
-
+	// Docked into the editor DockSpace (right inspector column); the user can
+	// float it out. No forced position — the dock/ini owns it.
 	if (!OnBegin(ImGuiWindowFlags_NoCollapse))
 		return;
 
@@ -304,7 +304,7 @@ bool UIPropertyPanel::EditPropertyRow(const String& id, const String& name,
 			ImGui::DragFloat("##v", &num, 0.5f, 0, 0, "%.1f");
 			if (ImGui::IsItemDeactivatedAfterEdit())
 			{
-				out_new_value = std::to_string(num) + (unit.empty() ? "px" : unit);
+				out_new_value = FormatFloat(num) + (unit.empty() ? "px" : unit);
 				changed = true;
 			}
 			ImGui::SameLine(0, 2);
@@ -317,7 +317,7 @@ bool UIPropertyPanel::EditPropertyRow(const String& id, const String& name,
 				for (int i = 0; i < 5; ++i)
 					if (ImGui::Selectable(kUnits[i], i == unit_idx))
 					{
-						out_new_value = std::to_string(num) + kUnits[i];
+						out_new_value = FormatFloat(num) + kUnits[i];
 						changed = true;
 					}
 				ImGui::EndCombo();
@@ -332,7 +332,7 @@ bool UIPropertyPanel::EditPropertyRow(const String& id, const String& name,
 			ImGui::DragFloat("##v", &num, 0.5f, 0, 0, "%.1f");
 			if (ImGui::IsItemDeactivatedAfterEdit())
 			{
-				out_new_value = std::to_string(num);
+				out_new_value = FormatFloat(num);
 				changed = true;
 			}
 			break;

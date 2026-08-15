@@ -11,6 +11,7 @@
 #include <imgui_impl_vulkan.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_internal.h>
+#include <iostream>
 #include "Render/Core/CommandQueue.h"
 #include "UI/BasePanel.h"
 #include "UI/RenderGraphEditor/Panels/RenderGraphPanel.h"
@@ -18,6 +19,8 @@
 #include "UI/RenderGraphEditor/Panels/OutlinePanel.h"
 #include "UI/UIPreviewPanel/UIPreviewPanel.h"
 #include "UI/UIDesigner/UIPalette.h"
+#include "UI/UIDesigner/UIDesignerState.h"
+#include "UI/UIManager.h"
 #include "UI/UIDesigner/UIPropertyPanel.h"
 #include "RHI/Vulkan/VK_Texture.h"
 
@@ -30,6 +33,48 @@ using namespace UI;
 
 Map<RHI::Texture*, ImTextureID> EditorUI::preview_texture_cache;
 static std::mutex g_preview_tex_mutex;   // logic-thread reads vs render-thread writes
+
+// Dock layout state: built once on first run (or after Window > Reset Layout).
+static bool s_layout_ready = false;
+static bool s_reset_layout = false;
+
+/// Commercial-engine style default dock layout (Unity-ish):
+///   ┌────────┬───────────────────────┬──────────────┐
+///   │ Outline│ TabBar: RenderGraph / │ Properties   │
+///   │        │        UI Preview     ├──────────────┤
+///   │        │                       │ UI Properties│
+///   ├────────┴───────────────────────┼──────────────┤
+///   │            (central)           │ UI Palette   │
+///   └────────────────────────────────┴──────────────┘
+/// All panels start docked; the user can drag them anywhere (ini persists).
+static void BuildDefaultDockLayout(ImGuiID dockspace_id, const ImVec2& size)
+{
+	ImGui::DockBuilderRemoveNode(dockspace_id);
+	ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+	ImGui::DockBuilderSetNodeSize(dockspace_id, size);
+
+	ImGuiID main = dockspace_id;
+	ImGuiID left, right;
+	ImGui::DockBuilderSplitNode(main, ImGuiDir_Left, 0.22f, &left, &main);
+	ImGui::DockBuilderSplitNode(main, ImGuiDir_Right, 0.30f, &right, &main);
+
+	// Right column: inspector (Properties over UI Properties), palette below.
+	ImGuiID right_top, palette;
+	ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.38f, &palette, &right_top);
+	ImGuiID props, ui_props;
+	ImGui::DockBuilderSplitNode(right_top, ImGuiDir_Down, 0.5f, &ui_props, &props);
+
+	// Central tabbed workspace: both editors share the tab bar.
+	ImGui::DockBuilderDockWindow("RenderGraphPanel", main);
+	ImGui::DockBuilderDockWindow("UI Preview", main);
+
+	ImGui::DockBuilderDockWindow("OutlinePanel", left);
+	ImGui::DockBuilderDockWindow("PropertiesPanel", props);
+	ImGui::DockBuilderDockWindow("UI Properties", ui_props);
+	ImGui::DockBuilderDockWindow("UI Palette", palette);
+
+	ImGui::DockBuilderFinish(dockspace_id);
+}
 void EditorUI::Init(PlatformWindow* in_window, RHI::Viewport* in_viewport)
 {
 	m_window = in_window;
@@ -105,8 +150,11 @@ ImDrawData* EditorUI::DrawFrame_Logic()
 
 	if (show_editor)
 	{
-		ImGuiViewport* main_vp = ImGui::GetMainViewport();
-		ImVec2 editor_pos = ImVec2(main_vp->Pos.x + main_vp->Size.x + 10, main_vp->Pos.y);
+		// The editor IS the main tool window — anchor it to the viewport
+		// origin. (Offsetting it right of the main viewport puts the whole UI
+		// off-screen once the OS window gets repositioned; a stale ini then
+		// keeps the panel layout out of reach.)
+		ImVec2 editor_pos = ImVec2(0, 0);
 		ImVec2 editor_size = ImVec2(1280, 960);
 
 		ImGui::SetNextWindowPos(editor_pos, ImGuiCond_FirstUseEver);
@@ -122,10 +170,101 @@ ImDrawData* EditorUI::DrawFrame_Logic()
 		ImGui::PopStyleVar(2);
 
 		ImGuiIO& io = ImGui::GetIO();
-		ImGui::Text("FPS: %.2f (%.2f ms)", io.Framerate, 1000.0f / io.Framerate);
 
-		ImGuiID dockspace_id = ImGui::GetID("EditorDockSpace");
-		ImGui::DockSpace(dockspace_id, ImVec2(0, 0), ImGuiDockNodeFlags_None);
+		// ---- Main menu bar (tool-agnostic: window visibility + layout) ----
+		if (ImGui::BeginMainMenuBar())
+		{
+			if (ImGui::BeginMenu("File"))
+			{
+				if (ImGui::MenuItem("Exit"))
+					editor_open = false;
+				ImGui::EndMenu();
+			}
+			if (ImGui::BeginMenu("Window"))
+			{
+				for (auto* p : panels)
+					ImGui::MenuItem(p->GetName().c_str(), nullptr, &p->is_show);
+				ImGui::Separator();
+				if (ImGui::MenuItem("Reset Layout"))
+					s_reset_layout = true;
+				ImGui::EndMenu();
+			}
+			if (ImGui::BeginMenu("Help"))
+			{
+				ImGui::TextDisabled("MXRender Editor");
+				ImGui::TextDisabled("RenderGraph + UI Designer");
+				ImGui::EndMenu();
+			}
+			ImGui::EndMainMenuBar();
+		}
+
+		// ---- Toolbar (quick actions, engine-style) ----
+		const float toolbar_h = 34.0f;
+		const float status_h = 26.0f;
+		const float avail_h = ImGui::GetContentRegionAvail().y;
+		ImGui::BeginChild("##Toolbar", ImVec2(0, toolbar_h), false, ImGuiWindowFlags_NoScrollbar);
+		{
+			if (ImGui::Button("Reload UI"))
+				UIManager::Get().ReloadAllDocuments();
+			ImGui::SameLine();
+			if (ImGui::Button("F8 Debugger"))
+				UIManager::Get().ToggleDebugger();
+			ImGui::SameLine();
+			if (ImGui::Button("Reset Layout"))
+				s_reset_layout = true;
+			ImGui::SameLine();
+			ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+			ImGui::SameLine();
+			ImGui::TextDisabled("RenderGraph Editor | UI Designer — drag tabs to reorganize");
+		}
+		ImGui::EndChild();
+		ImGui::Separator();
+
+		// ---- Central workspace (dock host) ----
+		ImGui::BeginChild("##DockHost", ImVec2(0, avail_h - toolbar_h - status_h), false, ImGuiWindowFlags_NoScrollbar);
+		{
+			ImGuiID dockspace_id = ImGui::GetID("EditorDockSpace");
+			ImGui::DockSpace(dockspace_id, ImVec2(0, 0), ImGuiDockNodeFlags_None);
+
+			// ---- Default dock layout (first run / manual reset) ----
+			// Commercial-engine style: central tabbed workspace (RenderGraph <->
+			// UI Designer), left hierarchy, right inspector, bottom-right tools.
+			// Built via DockBuilder ONLY when the dock has no layout yet (fresh
+			// ini); otherwise the imgui.ini owns the layout and the user's
+			// re-docks persist. Window > Reset Layout forces a rebuild.
+			if (!s_layout_ready || s_reset_layout)
+			{
+				s_layout_ready = true;
+				if (s_reset_layout || ImGui::DockBuilderGetNode(dockspace_id) == nullptr
+					|| ImGui::DockBuilderGetNode(dockspace_id)->ChildNodes[0] == nullptr)
+				{
+					s_reset_layout = false;
+					BuildDefaultDockLayout(dockspace_id, ImVec2(1280, 960));
+				}
+				else
+				{
+					s_reset_layout = false;
+				}
+			}
+		}
+		ImGui::EndChild();
+		ImGui::Separator();
+
+		// ---- Status bar (bottom, engine-style) ----
+		ImGui::BeginChild("##StatusBar", ImVec2(0, status_h), false, ImGuiWindowFlags_NoScrollbar);
+		{
+			const String sel = UI::UIDesignerState::Get().GetSelection();
+			ImGui::Text("FPS: %.1f (%.1f ms)", io.Framerate, 1000.0f / io.Framerate);
+			ImGui::SameLine();
+			ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+			ImGui::SameLine();
+			ImGui::Text("UI Preview: %s", UI::UIPreviewPanel::IsReady() ? "ready" : "initializing");
+			ImGui::SameLine();
+			ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+			ImGui::SameLine();
+			ImGui::Text("Selected: %s", sel.empty() ? "-" : sel.c_str());
+		}
+		ImGui::EndChild();
 
 		for (auto& panel : panels)
 		{

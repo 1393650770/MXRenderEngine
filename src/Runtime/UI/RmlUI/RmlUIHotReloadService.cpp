@@ -118,9 +118,18 @@ void RmlUIHotReloadService::ScanDirectory(const String& dir, UIHotReloadChangeSe
 			if (ec) { ec.clear(); src_mtime = 0.0; }
 			if (src_mtime != 0.0 && src_mtime != st.source)
 			{
-				Vector<UInt8> bytes;
-				if (Platform::PlatformFile::ReadFile(src, bytes)
-					&& Platform::PlatformFile::WriteFileAtomic(out_path, bytes))
+				// Content-compare first: the EDITOR writes both copies itself
+				// (UIDesignerState::WriteFiles), so the mtime bump is not a
+				// real edit — copying would re-touch the output and restart the
+				// reload ping-pong on every designer command.
+				Vector<UInt8> bytes, cur;
+				const bool src_read = Platform::PlatformFile::ReadFile(src, bytes);
+				const bool same = src_read && Platform::PlatformFile::ReadFile(out_path, cur) && cur == bytes;
+				if (same)
+				{
+					st.source = src_mtime;   // already in sync — just re-stamp
+				}
+				else if (src_read && Platform::PlatformFile::WriteFileAtomic(out_path, bytes))
 				{
 					std::cout << "[UIHotReload] copied " << src << " -> " << out_path << std::endl;
 					out_mtime = (Float64)std::filesystem::last_write_time(entry.path(), ec).time_since_epoch().count();

@@ -102,12 +102,12 @@ VK_SwapChain::VK_SwapChain(VkInstance in_instance, VK_Device* in_device, void* i
 	vkGetPhysicalDeviceSurfacePresentModesKHR(device->GetGpu(), surface, &num_found_present_modes, FoundPresentModes.data());
 
 
-	for (const auto& CurPresentMode : FoundPresentModes) {
-		if (CurPresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-			present_mode = CurPresentMode;
-			break;
-		}
-	}
+	// MAILBOX is NOT used: on this driver (NVIDIA, 2026-08 verified) MAILBOX
+	// + uncapped frame rate leaks ~27MB/s of driver host memory (MEM_MAPPED)
+	// that never returns — the editor grew to 8+GB and crashed within minutes.
+	// FIFO (vsync) is the only verified-stable mode here; revisit when the
+	// driver stops leaking or a vsync-aware MAILBOX (flag-gated) is wanted.
+	(void)FoundPresentModes;
 	VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 	if (surf_properties.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
 	{

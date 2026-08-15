@@ -100,6 +100,7 @@ public:
 	// ---- Editor designer pass-throughs (see UISystem for semantics) ----
 	String PickElementAt(Int x, Int y);
 	Bool GetElementBox(const String& id, Float32& x, Float32& y, Float32& w, Float32& h);
+	Bool GetElementTransform(const String& id, Float32& tx, Float32& ty);
 	void SetElementBoxTransient(const String& id, Float32 x, Float32 y, Float32 w, Float32 h);
 
 private:

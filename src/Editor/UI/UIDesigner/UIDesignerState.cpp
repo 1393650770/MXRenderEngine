@@ -119,6 +119,18 @@ UIDesignerState::Snapshot UIDesignerState::Capture() const
 void UIDesignerState::Restore(const Snapshot& snap)
 {
 	if (!m_loaded) return;
+	// Idempotency short-cut: command ctors apply the mutation AND the history
+	// Execute path re-runs Restore(m_after) — if the IR already serializes to
+	// the snapshot text, skip the write + reload entirely (a command must not
+	// ping-pong the hot-reload pipeline twice).
+	const String cur_rml = UIDocumentSerializer::SerializeRml(m_doc);
+	const String cur_rcss = UIDocumentSerializer::SerializeRcss(m_ss);
+	if (cur_rml == snap.rml_text && cur_rcss == snap.rcss_text)
+	{
+		if (!m_selection.empty() && !FindNodeById(m_selection))
+			m_selection.clear();
+		return;
+	}
 	// Re-parse the snapshot text back into the IRs — keeps the IR canonical
 	// (parent pointers rebuilt) and in-memory == on-disk.
 	m_doc = RmlParser::Parse(snap.rml_text, m_doc.file_path);

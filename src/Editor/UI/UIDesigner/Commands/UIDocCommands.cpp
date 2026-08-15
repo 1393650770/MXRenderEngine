@@ -1,4 +1,5 @@
 #include "UIDocCommands.h"
+#include "UI/UIManager.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
@@ -117,10 +118,18 @@ SetBoxCmd::SetBoxCmd(String desc, UIDesignerState* state, String id,
 	(void)old_box;   // kept in the snapshot; the API shape mirrors drag commits
 	state->ApplyMutation([&]()
 	{
+		// new_box arrives in RENDERED coords (GetElementBox folds transforms in);
+		// left/top are LAYOUT values, so undo the element's transform
+		// translation — `translateX(-50%)` elements would otherwise land half
+		// a box-width right of where the user dropped them.
+		Float32 tx = 0.0f, ty = 0.0f;
+		UIManager::Get().GetElementTransform(id, tx, ty);
 		UIRuleSet& rule = UIDesignerState::FindOrCreateIdRule(state->Rcss(), id);
 		UIDesignerState::SetRuleProperty(rule, "position", "absolute");
-		UIDesignerState::SetRuleProperty(rule, "left", std::to_string((int)new_box.x) + "px");
-		UIDesignerState::SetRuleProperty(rule, "top", std::to_string((int)new_box.y) + "px");
+		UIDesignerState::SetRuleProperty(rule, "left",
+			std::to_string((int)(new_box.x - tx)) + "px");
+		UIDesignerState::SetRuleProperty(rule, "top",
+			std::to_string((int)(new_box.y - ty)) + "px");
 		UIDesignerState::SetRuleProperty(rule, "width", std::to_string((int)new_box.w) + "px");
 		UIDesignerState::SetRuleProperty(rule, "height", std::to_string((int)new_box.h) + "px");
 	});

@@ -7,6 +7,15 @@
 
 namespace MXRender::Tool::CssToRcss {
 
+/// Joins a token run into canonical text: single spaces between tokens,
+/// except inside function parentheses (`translateX(-50%)` stays glued), inside
+/// attribute brackets (`[type="range"]` stays glued) and around ':' (pseudo
+/// `#id:hover` stays glued) - RmlUi's parsers reject or mis-parse the spaced
+/// forms (`input [ type = "range" ]` reads as a descendant combinator).
+std::string JoinTokens(const std::vector<CssToken>& tokens);
+/// Selector-specialized alias of JoinTokens (keeps call sites intentful).
+std::string JoinSelector(const std::vector<CssToken>& selector);
+
 /// Deterministic canonical RCSS output:
 ///   selector1, selector2 {
 ///   \tprop: value;

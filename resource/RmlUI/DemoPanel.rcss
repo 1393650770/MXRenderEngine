@@ -31,9 +31,7 @@ body {
 #title-panel {
 	position: absolute;
 	top: 20px;
-	left: 50%;
-	transform: translateX(-50%);
-	text-align: center;
+	left: 20px;
 	background: #00000088;
 	padding: 8px 24px;
 	border-radius: 8px;

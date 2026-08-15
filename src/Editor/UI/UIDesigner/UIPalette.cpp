@@ -65,17 +65,8 @@ const UIWidgetTemplate* UIPalettePanel::FindTemplate(const String& name)
 
 void UIPalettePanel::Draw()
 {
-	// Park the palette right of the preview canvas (its default floating spot
-	// at 60,60 overlaps the canvas and eats its hover/click). Always-cond:
-	// Once would honor the stale ini position and never move it.
-	static bool s_placed = false;
-	if (!s_placed)
-	{
-		ImGui::SetNextWindowPos(ImVec2(760, 100), ImGuiCond_Always);
-		ImGui::SetNextWindowSize(ImVec2(380, 440), ImGuiCond_Always);
-		s_placed = true;
-	}
-
+	// Docked into the editor DockSpace (bottom-right tools area); the user can
+	// float it out. No forced position — the dock/ini owns it.
 	if (!OnBegin(ImGuiWindowFlags_NoCollapse))
 		return;
 

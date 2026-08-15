@@ -1,5 +1,6 @@
 #include "UIRcssParser.h"
-#include "CssParser.h"   // CssToRcssLib
+#include "CssParser.h"     // CssToRcssLib
+#include "RcssEmitter.h"   // shared JoinTokens (bracket/colon/paren-aware)
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(UI)
@@ -8,50 +9,6 @@ MYRENDERER_BEGIN_NAMESPACE(UIDocModel)
 namespace {
 
 using namespace MXRender::Tool::CssToRcss;
-
-/// Joins tokens with single spaces EXCEPT inside function parentheses —
-/// `translateX(-50%)` must stay `translateX(-50%)`, not `translateX( -50% )`
-/// (RmlUi's transform parser rejects the spaced form).
-String JoinTokens(const std::vector<CssToken>& tokens)
-{
-	String out;
-	int paren_depth = 0;
-	for (const auto& t : tokens)
-	{
-		if (t.kind == ETokenKind::Function)
-		{
-			if (!out.empty() && paren_depth == 0) out += ' ';
-			out += t.text;
-			out += '(';
-			++paren_depth;
-			continue;
-		}
-		if (t.kind == ETokenKind::RParen)
-		{
-			out += ')';
-			if (paren_depth > 0) --paren_depth;
-			continue;
-		}
-		if (t.kind == ETokenKind::Comma)
-		{
-			out += ',';
-			continue;
-		}
-		if (!out.empty() && paren_depth == 0) out += ' ';
-		out += t.text;
-	}
-	return out;
-}
-
-String JoinSelector(const std::vector<CssToken>& selector)
-{
-	return JoinTokens(selector);
-}
-
-String RenderValue(const std::vector<CssToken>& value)
-{
-	return JoinTokens(value);
-}
 
 EAtRuleKind MapAtRuleKind(const String& name)
 {
@@ -67,31 +24,22 @@ UIRuleSet ToRuleSet(const CssRule& rule)
 {
 	UIRuleSet out;
 	out.source_line = rule.line;
-	String current;
+	std::vector<CssToken> part;
 	for (const auto& t : rule.selector)
 	{
 		if (t.kind == ETokenKind::Comma)
 		{
-			String trimmed = current;
-			size_t b = trimmed.find_first_not_of(" \t\r\n");
-			size_t e = trimmed.find_last_not_of(" \t\r\n");
-			trimmed = (b == String::npos) ? "" : trimmed.substr(b, e - b + 1);
-			if (!trimmed.empty()) out.selectors.push_back(trimmed);
-			current.clear();
+			String sel = JoinTokens(part);
+			if (!sel.empty()) out.selectors.push_back(std::move(sel));
+			part.clear();
 			continue;
 		}
-		if (!current.empty()) current += ' ';
-		current += t.text;
+		part.push_back(t);
 	}
-	{
-		String trimmed = current;
-		size_t b = trimmed.find_first_not_of(" \t\r\n");
-		size_t e = trimmed.find_last_not_of(" \t\r\n");
-		trimmed = (b == String::npos) ? "" : trimmed.substr(b, e - b + 1);
-		if (!trimmed.empty()) out.selectors.push_back(trimmed);
-	}
+	String last = JoinTokens(part);
+	if (!last.empty()) out.selectors.push_back(std::move(last));
 	for (const auto& d : rule.declarations)
-		out.properties.push_back(UICssProperty{ d.property, RenderValue(d.value), d.line });
+		out.properties.push_back(UICssProperty{ d.property, JoinTokens(d.value), d.line });
 	return out;
 }
 
@@ -112,12 +60,11 @@ UIStyleSheet UIRcssParser::Parse(const String& text, const String& file_path)
 		uiat.kind = MapAtRuleKind(at.name);
 		uiat.name = at.name;
 		uiat.source_line = at.line;
-		for (const auto& t : at.prelude)
-			uiat.prelude += (uiat.prelude.empty() ? "" : " ") + t.text;
+		uiat.prelude = JoinTokens(at.prelude);
 		for (const auto& rule : at.rules)
 			uiat.rules.push_back(ToRuleSet(rule));
 		for (const auto& d : at.declarations)
-			uiat.properties.push_back(UICssProperty{ d.property, RenderValue(d.value), d.line });
+			uiat.properties.push_back(UICssProperty{ d.property, JoinTokens(d.value), d.line });
 		out.at_rules.push_back(std::move(uiat));
 	}
 	for (const auto& issue : css.issues)

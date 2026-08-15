@@ -164,24 +164,15 @@ void UIPreviewPanel::Update()
 
 void UIPreviewPanel::Draw()
 {
-	// The preview canvas is a fixed 640x480 image — keep the panel FLOATING
-	// and parked left, with the designer panels (palette/property) to its
-	// right. (A stale ini DockId keeps docking the panel into the DockSpace
-	// where SetWindowSize is ignored — detach it explicitly; SetNextWindow*
-	// calls MUST precede Begin.)
-	static bool s_placed = false;
-	if (!s_placed)
-	{
-		ImGui::SetNextWindowPos(ImVec2(60, 100), ImGuiCond_Always);
-		s_placed = true;
-	}
-	ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+	// The preview canvas is a fixed 640x480 image. The panel lives in the
+	// editor DockSpace (central tab, see BuildDefaultDockLayout); the user can
+	// float it out at will. No forced position — the dock/ini owns it.
 
 	if (!OnBegin(ImGuiWindowFlags_NoCollapse))
 		return;
 
-	// Floating (undocked) — pin the size directly after Begin.
-	ImGui::SetWindowSize(ImVec2(680, 560));
+	// Minimum size so the 640x480 canvas stays usable when undocked.
+	ImGui::SetWindowSize(ImVec2(680, 560), ImGuiCond_FirstUseEver);
 
 	if (m_ready.load() && m_color_tex)
 	{

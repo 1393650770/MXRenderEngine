@@ -2,38 +2,67 @@
 
 namespace MXRender::Tool::CssToRcss {
 
-namespace {
+// =========================================================================
+// Token joining (public - shared with the editor's UIRcssParser)
+//
+// Joins tokens with single spaces EXCEPT:
+//  - inside function parentheses - `translateX(-50%)` stays glued (RmlUi's
+//    transform parser rejects the spaced form)
+//  - inside attribute brackets - `[type="range"]` stays glued (a space after
+//    `input` turns it into a descendant combinator that never matches)
+//  - around ':' - `#id:hover` stays glued (the spaced form also reads as a
+//    descendant combinator and the hover never fires)
+// =========================================================================
 
-/// Joins tokens with single spaces EXCEPT inside function parentheses —
-/// `translateX(-50%)` must stay `translateX(-50%)`, not `translateX( -50% )`
-/// (RmlUi's transform parser rejects the spaced form).
 std::string JoinTokens(const std::vector<CssToken>& tokens)
 {
 	std::string out;
-	int paren_depth = 0;
+	int paren_depth = 0, bracket_depth = 0;
+	bool glue_next = false;   // a ':' glued - the next token must not be spaced
 	for (const auto& t : tokens)
 	{
-		if (t.kind == ETokenKind::Function)
+		const bool inside = paren_depth > 0 || bracket_depth > 0;
+		switch (t.kind)
 		{
-			if (!out.empty() && paren_depth == 0) out += ' ';
+		case ETokenKind::Function:
+			if (!out.empty() && !inside && !glue_next) out += ' ';
 			out += t.text;
-			out += '(';
+			// The tokenizer's function token is the bare ident ("translateX")
+			// with the '(' consumed - except a lone '(' which is its own token.
+			if (t.text.empty() || t.text.back() != '(') out += '(';
 			++paren_depth;
+			glue_next = false;
 			continue;
-		}
-		if (t.kind == ETokenKind::RParen)
-		{
+		case ETokenKind::RParen:
 			out += ')';
 			if (paren_depth > 0) --paren_depth;
+			glue_next = false;
 			continue;
-		}
-		if (t.kind == ETokenKind::Comma)
-		{
+		case ETokenKind::LBracket:
+			// Glue to the preceding selector part — `input[type="range"]`, not
+			// `input [type="range"]` (the space reads as a descendant combinator).
+			out += '[';
+			++bracket_depth;
+			glue_next = false;
+			continue;
+		case ETokenKind::RBracket:
+			out += ']';
+			if (bracket_depth > 0) --bracket_depth;
+			glue_next = false;
+			continue;
+		case ETokenKind::Colon:
+			out += ':';
+			glue_next = true;
+			continue;
+		case ETokenKind::Comma:
 			out += ',';
+			glue_next = false;
 			continue;
+		default:
+			if (!out.empty() && !inside && !glue_next) out += ' ';
+			out += t.text;
+			glue_next = false;
 		}
-		if (!out.empty() && paren_depth == 0) out += ' ';
-		out += t.text;
 	}
 	return out;
 }
@@ -43,11 +72,6 @@ std::string JoinSelector(const std::vector<CssToken>& selector)
 	return JoinTokens(selector);
 }
 
-std::string RenderValue(const std::vector<CssToken>& value)
-{
-	return JoinTokens(value);
-}
-
 void EmitDeclarations(const std::vector<CssDeclaration>& decls, std::string& out)
 {
 	for (const auto& d : decls)
@@ -55,7 +79,7 @@ void EmitDeclarations(const std::vector<CssDeclaration>& decls, std::string& out
 		out += "\t";
 		out += d.property;
 		out += ": ";
-		out += RenderValue(d.value);
+		out += JoinTokens(d.value);
 		out += ";\n";
 	}
 }
@@ -68,8 +92,6 @@ void EmitRule(const CssRule& rule, std::string& out)
 	EmitDeclarations(rule.declarations, out);
 	out += "}\n";
 }
-
-} // namespace
 
 std::string RcssEmitter::Emit(const CssStylesheet& stylesheet)
 {

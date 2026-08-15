@@ -88,9 +88,19 @@ public:
 	/// nearest ancestor with an id — designers want whole widgets, not leaves.
 	/// LOGIC thread only (same ownership as the backend's per-frame Update).
 	virtual String PickElementAt(Int x, Int y) { (void)x; (void)y; return {}; }
-	/// Current box (x, y, w, h) of an element in viewport px. False if unknown.
+	/// Current box (x, y, w, h) of an element in viewport px. RENDERED box:
+	/// the layout box plus the element's transform translation (RmlUi applies
+	/// transforms at render time only — layout coords would draw the designer
+	/// selection box half a box-width off for `translateX(-50%)` elements).
+	/// False if unknown.
 	virtual Bool GetElementBox(const String& id, Float32& x, Float32& y,
 		Float32& w, Float32& h) { (void)id; return false; }
+	/// Translation part of the element's render transform (viewport px),
+	/// i.e. what GetElementBox already folded in. The designer needs it to
+	/// write LAYOUT values (left/top) that render at a given position: the
+	/// inverse of the fold. False when the element has no transform.
+	virtual Bool GetElementTransform(const String& id, Float32& tx, Float32& ty)
+	{ (void)id; return false; }
 	/// TRANSIENT overlay: repositions an element without persisting. Rendered
 	/// as inline style — the hot-reload pipeline re-reads only the stylesheet,
 	/// so overlays vanish on reload (exactly what drag previews need; the
