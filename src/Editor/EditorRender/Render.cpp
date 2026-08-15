@@ -268,18 +268,15 @@ void EditorRenderPipeline::InitRenderPasses()
 			//   Get current swapchain image each frame (swapchain rotates images)
 			auto* rt_tex = this->m_viewport->GetCurrentBackBufferRTV();
 			auto* ds_tex = this->m_viewport->GetCurrentBackBufferDSV();
-			std::cout << "[SkyboxPass] rt=" << (void*)rt_tex << " ds=" << (void*)ds_tex << " res_count=" << res.size() << std::endl;
-			if (!rt_tex) { std::cout << "[SkyboxPass] no rt_tex!" << std::endl; return; }
+			if (!rt_tex) return;
 			Vector<RHI::ClearValue> cvs = { RHI::ClearValue{0.2f,0.2f,0.3f,1.0f} };
 			if (ds_tex) cvs.push_back(RHI::ClearValue{1.0f,0});
 			cmd->SetRenderTarget({rt_tex}, ds_tex, cvs, ds_tex != nullptr);
 			if (auto* cm = res["SkyboxCubemap"]) {
-				if (auto* t = cm->GetAsTexture()) { skybox_srb->SetResource("cubemap_sampler", t); std::cout << "[SkyboxPass] cubemap bound" << std::endl; }
-				else std::cout << "[SkyboxPass] cubemap GetAsTexture null" << std::endl;
-			} else std::cout << "[SkyboxPass] no SkyboxCubemap in res" << std::endl;
+				if (auto* t = cm->GetAsTexture()) skybox_srb->SetResource("cubemap_sampler", t);
+			}
 			cmd->SetGraphicsPipeline(skybox_pipeline); cmd->SetShaderResourceBinding(skybox_srb);
 			cmd->Draw(DrawAttribute{6,1,0,0});
-			std::cout << "[SkyboxPass] draw done" << std::endl;
 		});
 	Render::RenderGraphBuilder::RegisterPassExecute("PBRPass",
 		[this](RHI::CommandList* cmd, Map<String, Render::RenderGraphResourceBase*>& res) {
@@ -417,14 +414,12 @@ void EditorRenderPipeline::OnUpdate(float dt)
 	{
 		rgp->GetCommandQueue().ProcessAll(rgp->GetCommandHistory());
 	}
-			std::cout << "[OnUpdate] ProcessAll done, pending=" << (rgp->HasPendingBuild()?"YES":"NO") << std::endl;
 
 	//   Tick debounced graph-modified event
 	{
 		std::lock_guard<std::mutex> lock(rebuild_mutex_);
 		if (rgp->HasPendingBuild()) {
 			deferred_def = rgp->GetPendingBuildDef(); has_deferred_rebuild = true; rgp->ClearPendingBuild();
-			std::cout << "[OnUpdate] rebuild set, graph=" << deferred_def.graph_name << std::endl;
 		}
 	}
 		UI::EditorEventBus::Get().TickFireGraphModified();
@@ -432,8 +427,6 @@ void EditorRenderPipeline::OnUpdate(float dt)
 
 void EditorRenderPipeline::OnRender()
 {
-	static int fc = 0;
-	if (++fc <= 5) std::cout << "[OnRender] frame=" << fc << " passes=" << graph.GetPasses().size() << std::endl;
 	// Backbuffer update is done in OnPreRender (called before OnRender each frame)
 	graph.Execute();
 }
