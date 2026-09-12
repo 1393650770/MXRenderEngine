@@ -67,6 +67,12 @@ public:
 	void UploadVisibleIDs();
 	void UploadDrawCommands();
 	void UploadUniforms();
+	void UploadInstances();
+	void UploadBatches();
+
+	// Resets every command's instanceCount to 0. The culling shader then
+	// atomically increments it, so this must run before the cull each frame.
+	void ResetDrawCommands();
 
 	// ---- batching ----
 	// One batch per drawable unit (mesh id). Instances within a batch may use
@@ -82,11 +88,14 @@ public:
 	RHI::Buffer* GetVisibleIDBuffer()const { return visible_buffer; }
 	RHI::Buffer* GetDrawCommandBuffer() const { return command_buffer; }
 	RHI::Buffer* GetUniformBuffer()  const { return uniform_buffer; }
+	RHI::Buffer* GetInstanceBuffer() const { return instance_buffer; }
+	RHI::Buffer* GetBatchBuffer()    const { return batch_buffer; }
 
 	// ---- CPU-side views (also used by the headless self-test) ----
 	GPUSceneUniformsData& GetUniforms() { return uniforms_cpu; }
 	const Vector<GPUBatch>& GetBatches() const { return batches; }
 	const Vector<UInt32>&   GetVisibleIDs() const { return visible_ids_cpu; }
+	const Vector<GPUInstanceData>& GetInstances() const { return instances_cpu; }
 	const Vector<DrawIndexedIndirectArgs>& GetDrawCommands() const { return draw_commands_cpu; }
 	const Vector<GPUObjectData>& GetObjects() const { return objects_cpu; }
 	UInt32 GetBatchCount() const { return static_cast<UInt32>(batches.size()); }
@@ -103,6 +112,7 @@ private:
 	Vector<GPUMaterialData>           materials_cpu;
 	Vector<GPUMeshMeta>               meshes_cpu;
 	Vector<UInt32>                    visible_ids_cpu;
+	Vector<GPUInstanceData>           instances_cpu;
 	Vector<DrawIndexedIndirectArgs>   draw_commands_cpu;
 	Vector<GPUBatch>                  batches;
 	GPUSceneUniformsData              uniforms_cpu{};
@@ -114,6 +124,8 @@ private:
 	RHI::Buffer* visible_buffer  = nullptr;
 	RHI::Buffer* command_buffer  = nullptr;
 	RHI::Buffer* uniform_buffer  = nullptr;
+	RHI::Buffer* instance_buffer = nullptr;
+	RHI::Buffer* batch_buffer    = nullptr;
 
 	Bool is_initialized = false;
 };

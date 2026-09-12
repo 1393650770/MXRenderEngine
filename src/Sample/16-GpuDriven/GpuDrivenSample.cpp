@@ -43,6 +43,30 @@ struct GpuDrivenPassData : public RenderGraphPassDataBase
 	void Release() override { delete srb; srb = nullptr; }
 };
 
+// Gribb-Hartmann plane extraction, adjusted for the engine's 0..1 depth range
+// (Vulkan convention: 0 <= z <= w in clip space, so the near plane is row2
+// rather than row3 + row2).
+static void ExtractFrustumPlanes(const glm::mat4& vp, glm::vec4 out[6])
+{
+	const glm::vec4 row0(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
+	const glm::vec4 row1(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
+	const glm::vec4 row2(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
+	const glm::vec4 row3(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+
+	out[0] = row3 + row0;   // left
+	out[1] = row3 - row0;   // right
+	out[2] = row3 + row1;   // bottom
+	out[3] = row3 - row1;   // top
+	out[4] = row2;          // near: z >= 0
+	out[5] = row3 - row2;   // far:  z <= w
+
+	for (Int i = 0; i < 6; ++i)
+	{
+		const Float32 len = glm::length(glm::vec3(out[i]));
+		if (len > 1e-6f) out[i] /= len;
+	}
+}
+
 class GpuDrivenApp : public Application::SampleApp
 {
 public:
@@ -60,6 +84,7 @@ protected:
 	Application::OrbitCameraController camera;
 	UInt32 frame_index = 0;
 	Float32 elapsed = 0.0f;
+	Bool   culling_enabled = true;
 };
 
 void GpuDrivenApp::OnInitScene()
@@ -124,6 +149,8 @@ void GpuDrivenApp::OnInitScene()
 	gpu_scene.UploadObjects();
 	gpu_scene.UploadMaterials();
 	gpu_scene.UploadVisibleIDs();
+	gpu_scene.UploadInstances();
+	gpu_scene.UploadBatches();
 	gpu_scene.UploadDrawCommands();
 
 	std::cout << "[GpuDriven] objects=" << gpu_scene.GetObjectCount()
@@ -135,7 +162,51 @@ void GpuDrivenApp::OnInitScene()
 	camera.distance = 22.0f;
 	scene_view.SetPerspective(glm::radians(45.0f), 0.1f, 200.0f);
 
-	// ---- 4. one pass, one binding, N indirect draws ---------------------------
+	// ---- 4a. GPU culling pass -------------------------------------------------
+	// Runs before the draw pass. It writes instanceCount into the very same
+	// buffer the draw pass then consumes as indirect arguments, so the CPU never
+	// learns which objects survived.
+	auto* cull_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneCull", &graph,
+		RHIGetImmediateCommandList(),
+		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+		{
+			Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
+				"Shader/gpuscene_cull.comp.spv");
+			data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
+
+			data.pso->CreateShaderResourceBinding(data.srb, false);
+			data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+			data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+			data.srb->SetResource("g_meshes", gpu_scene.GetMeshBuffer());
+			data.srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
+			data.srb->SetResource("g_candidates", gpu_scene.GetInstanceBuffer());
+			data.srb->SetResource("g_commands", gpu_scene.GetDrawCommandBuffer());
+			data.srb->SetResource("g_batches", gpu_scene.GetBatchBuffer());
+			data.srb->FlushDescriptorWrites();
+
+			delete cs;
+		},
+		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+		{
+			const UInt32 count = gpu_scene.GetObjectCount();
+			if (count == 0) return;
+
+			in_cmd->SetComputePipeline(data.pso);
+			in_cmd->SetShaderResourceBinding(data.srb);
+			in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
+
+			// The draw args and the visible list were just written by a shader.
+			// Both buffers are retained, so the RDG's automatic pass-boundary
+			// barriers do not cover them — they need explicit ones here.
+			in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
+				ENUM_RESOURCE_STATE::IndirectArgument);
+			in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
+				ENUM_RESOURCE_STATE::ShaderResource);
+		});
+	cull_pass->SetIsCullable(false);
+	cull_pass->SetShaderPath("Shader/gpuscene_cull");
+
+	// ---- 4b. one pass, one binding, N indirect draws ---------------------------
 	auto* pass = graph.AddRenderPass<GpuDrivenPassData>("GpuDrivenPass", &graph,
 		RHIGetImmediateCommandList(),
 		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
@@ -221,9 +292,15 @@ void GpuDrivenApp::OnUpdate(float dt)
 	u.view = scene_view.GetViewMatrix();
 	u.camera_position = glm::vec4(scene_view.GetViewLocation(), 1.0f);
 	u.light_dir = glm::vec4(glm::normalize(glm::vec3(0.4f, 0.8f, 0.45f)), 0.0f);
+	ExtractFrustumPlanes(u.view_proj, u.frustum_planes);
 	u.counts.x = gpu_scene.GetObjectCount();
 	u.counts.y = frame_index++;
+	u.counts.z = culling_enabled ? 1u : 0u;
 	gpu_scene.UploadUniforms();
+
+	// Clear instanceCount so the culling shader can accumulate it again.
+	// Geometry fields (indexCount/firstIndex) are untouched by this.
+	gpu_scene.ResetDrawCommands();
 
 	// Slow spin. Only the 96-byte object record is rewritten — no descriptor
 	// touch, which is the entire point.
@@ -332,6 +409,19 @@ static Int RunSelfTest()
 	Bool no_holes = true;
 	for (UInt32 v : vis) if (v == kInvalidIndex) no_holes = false;
 	Check(no_holes, "visibleIDs has no holes");
+
+	// --- instance stream: the culling shader's input ---
+	Check(sizeof(GPUInstanceData) == 8, "GPUInstanceData is 8 bytes");
+	const Vector<GPUInstanceData>& insts = scene.GetInstances();
+	Check(insts.size() == 5, "one instance entry per object");
+	Check(insts[0].object_id == 0u && insts[0].batch_id == 0u, "object0 maps to batch0");
+	Check(insts[1].object_id == 1u && insts[1].batch_id == 1u, "object1 maps to batch1");
+	Check(insts[4].object_id == 4u && insts[4].batch_id == 0u, "object4 maps to batch0");
+
+	Bool batch_ids_valid = true;
+	for (const GPUInstanceData& inst : insts)
+		if (inst.batch_id >= scene.GetBatchCount()) batch_ids_valid = false;
+	Check(batch_ids_valid, "every instance points at a real batch");
 
 	// --- indirect args ---
 	scene.BuildDrawCommands(pool);

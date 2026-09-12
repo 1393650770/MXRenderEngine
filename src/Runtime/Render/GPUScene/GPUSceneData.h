@@ -76,6 +76,17 @@ struct GPUMeshMeta
 	UInt32 lod_offsets[4] = { 0, 0, 0, 0 };                 // 16  reserved for LOD (stage 5)
 };
 
+// ---- The culling shader's input stream (8 bytes) ---------------------------
+// Mirrors `struct GPUInstanceData` in GPUScene.glsl.
+// One entry per object, built at registration time; only changes when objects
+// are added or removed. Lets the culling shader know both which object it is
+// looking at and which batch's slice it belongs to.
+struct GPUInstanceData
+{
+	UInt32 object_id = kInvalidIndex;   // 4
+	UInt32 batch_id = kInvalidIndex;    // 4
+};
+
 // ---- Per-scene + per-camera uniforms (288 bytes) ---------------------------
 // Mirrors `struct GPUSceneUniformsData` in GPUScene.glsl.
 // PerScene and PerCamera live in one buffer: both update once per view, and the
@@ -114,6 +125,8 @@ static_assert(sizeof(GPUObjectData) == 96, "GPUObjectData must be 96 bytes (std4
 static_assert(sizeof(GPUMaterialData) == 48, "GPUMaterialData must be 48 bytes (std430)");
 static_assert(sizeof(GPUMeshMeta) == 48, "GPUMeshMeta must be 48 bytes (std430)");
 static_assert(sizeof(GPUSceneUniformsData) == 288, "GPUSceneUniformsData must be 288 bytes (std430)");
+static_assert(sizeof(GPUInstanceData) == 8, "GPUInstanceData must be 8 bytes (std430)");
+static_assert(sizeof(GPUBatch) == 16, "GPUBatch must be 16 bytes (std430)");
 
 MYRENDERER_END_NAMESPACE
 MYRENDERER_END_NAMESPACE

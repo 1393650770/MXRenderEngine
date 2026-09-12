@@ -15,6 +15,7 @@ Bool GPUSceneManager::Initialize(const Config& cfg, const MeshPool& pool)
 	objects_cpu.clear();
 	materials_cpu.clear();
 	visible_ids_cpu.clear();
+	instances_cpu.clear();
 	draw_commands_cpu.clear();
 	batches.clear();
 	objects_cpu.reserve(cfg.max_objects);
@@ -32,6 +33,10 @@ Bool GPUSceneManager::Initialize(const Config& cfg, const MeshPool& pool)
 		cfg.max_meshes * sizeof(GPUMeshMeta), sizeof(GPUMeshMeta), ENUM_BUFFER_TYPE::Dynamic);
 	visible_buffer = Tool::BufferUtils::CreateStorageBuffer(
 		cfg.max_objects * sizeof(UInt32), sizeof(UInt32), ENUM_BUFFER_TYPE::Dynamic);
+	instance_buffer = Tool::BufferUtils::CreateStorageBuffer(
+		cfg.max_objects * sizeof(GPUInstanceData), sizeof(GPUInstanceData), ENUM_BUFFER_TYPE::Dynamic);
+	batch_buffer = Tool::BufferUtils::CreateStorageBuffer(
+		cfg.max_batches * sizeof(GPUBatch), sizeof(GPUBatch), ENUM_BUFFER_TYPE::Dynamic);
 
 	// Storage|Indirect|Dynamic: the CPU fills it in stage 1, and from stage 2 on
 	// the culling compute shader writes instanceCount into it directly.
@@ -47,11 +52,13 @@ Bool GPUSceneManager::Initialize(const Config& cfg, const MeshPool& pool)
 	ENSURE(mesh_buffer != nullptr, "GPUScene: failed to allocate mesh buffer");
 	ENSURE(visible_buffer != nullptr, "GPUScene: failed to allocate visible-id buffer");
 	ENSURE(command_buffer != nullptr, "GPUScene: failed to allocate draw-command buffer");
-	ENSURE(uniform_buffer != nullptr, "GPUScene: failed to allocate uniform buffer");
+	ENSURE(instance_buffer != nullptr, "GPUScene: failed to allocate instance buffer");
+	ENSURE(batch_buffer != nullptr, "GPUScene: failed to allocate batch buffer");
 
 	UploadMeshes(pool);
 	is_initialized = object_buffer && material_buffer && mesh_buffer
-		&& visible_buffer && command_buffer && uniform_buffer;
+		&& visible_buffer && command_buffer && uniform_buffer
+		&& instance_buffer && batch_buffer;
 	return is_initialized;
 }
 
@@ -62,6 +69,7 @@ void GPUSceneManager::Shutdown()
 	materials_cpu.clear();
 	meshes_cpu.clear();
 	visible_ids_cpu.clear();
+	instances_cpu.clear();
 	draw_commands_cpu.clear();
 	batches.clear();
 	is_initialized = false;
@@ -75,6 +83,8 @@ void GPUSceneManager::ReleaseBuffers()
 	delete visible_buffer;  visible_buffer = nullptr;
 	delete command_buffer;  command_buffer = nullptr;
 	delete uniform_buffer;  uniform_buffer = nullptr;
+	delete instance_buffer; instance_buffer = nullptr;
+	delete batch_buffer;    batch_buffer = nullptr;
 }
 
 UInt32 GPUSceneManager::AddMaterial(const GPUMaterialData& material)
@@ -141,6 +151,29 @@ void GPUSceneManager::UploadDrawCommands()
 	Tool::BufferUtils::Upload(command_buffer, draw_commands_cpu.data(), bytes);
 }
 
+void GPUSceneManager::UploadInstances()
+{
+	if (!instance_buffer || instances_cpu.empty()) return;
+	const UInt32 bytes = static_cast<UInt32>(instances_cpu.size() * sizeof(GPUInstanceData));
+	Tool::BufferUtils::Upload(instance_buffer, instances_cpu.data(), bytes);
+}
+
+void GPUSceneManager::UploadBatches()
+{
+	if (!batch_buffer || batches.empty()) return;
+	const UInt32 bytes = static_cast<UInt32>(batches.size() * sizeof(GPUBatch));
+	Tool::BufferUtils::Upload(batch_buffer, batches.data(), bytes);
+}
+
+void GPUSceneManager::ResetDrawCommands()
+{
+	// Only instanceCount needs clearing; the geometry fields are rebuilt by
+	// BuildDrawCommands and must survive.
+	for (DrawIndexedIndirectArgs& args : draw_commands_cpu)
+		args.instance_count = 0;
+	UploadDrawCommands();
+}
+
 void GPUSceneManager::UploadUniforms()
 {
 	if (!uniform_buffer) return;
@@ -166,14 +199,18 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 			counts[obj.mesh_id]++;
 	}
 
-	// Reserve one contiguous slice of visibleIDs[] per batch.
+	// Reserve one contiguous slice of visibleIDs[] per batch, and remember which
+	// batch index each mesh ended up in — the culling shader needs it to know
+	// where an instance's output belongs.
 	Vector<UInt32> base_of(mesh_count, 0u);
+	Vector<UInt32> batch_index_of(mesh_count, kInvalidIndex);
 	UInt32 cursor = 0u;
 	for (UInt32 m = 0; m < mesh_count; ++m)
 	{
 		base_of[m] = cursor;
 		if (counts[m] > 0)
 		{
+			batch_index_of[m] = static_cast<UInt32>(batches.size());
 			GPUBatch batch{};
 			batch.mesh_id            = m;
 			batch.base_instance      = cursor;
@@ -185,14 +222,27 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 	}
 
 	visible_ids_cpu.assign(cursor, kInvalidIndex);
+	instances_cpu.clear();
+	instances_cpu.reserve(objects_cpu.size());
 
-	// Scatter object ids into their batch's slice.
-	Vector<UInt32> write_cursor = base_of;
+	// Scatter object ids into their batch's slice, and record the reverse
+	// mapping (object -> batch) that the culling shader consumes.
+	// write_cursor counts within a batch's slice (0-based) — the slice offset is
+	// added separately, so it must NOT be seeded from base_of or every write
+	// lands one slice too far (and past the end for the final batch).
+	Vector<UInt32> write_cursor(mesh_count, 0u);
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
 		const UInt32 mesh_id = objects_cpu[i].mesh_id;
 		if (mesh_id >= mesh_count) continue;
-		visible_ids_cpu[write_cursor[mesh_id]++] = i;
+
+		const UInt32 slot = write_cursor[mesh_id]++;
+		visible_ids_cpu[base_of[mesh_id] + slot] = i;
+
+		GPUInstanceData inst{};
+		inst.object_id = i;
+		inst.batch_id = batch_index_of[mesh_id];
+		instances_cpu.push_back(inst);
 	}
 }
 

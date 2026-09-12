@@ -1,0 +1,76 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "../Global/GPUScene.glsl"
+
+// GPU culling: frustum test per instance, GPU writes the result straight into
+// the indirect draw arguments.
+//
+// This is the pass that makes the pipeline "GPU-driven": the CPU never learns
+// which objects are visible. It submits one indirect command buffer whose
+// instanceCount was filled in by a shader.
+//
+// Two outputs per visible instance:
+//   1. atomicAdd on DrawCommands[batchID].instanceCount
+//   2. the object id written into the batch's reserved slice of visibleIDs[]
+//
+// The slice offset comes from GPUBatchData.baseInstance, which is why every
+// batch must reserve its max capacity up front.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer SceneUniforms { GPUSceneUniformsData u; } g_scene;
+
+layout(std430, set = 1, binding = 0) readonly buffer Objects    { GPUObjectData   objects[];    } g_objects;
+layout(std430, set = 1, binding = 2) readonly buffer Meshes     { GPUMeshMeta     meshes[];     } g_meshes;
+layout(std430, set = 1, binding = 3) buffer         VisibleIDs  { uint            ids[];        } g_visible;
+layout(std430, set = 1, binding = 4) readonly buffer Candidates { GPUInstanceData instances[];  } g_candidates;
+layout(std430, set = 1, binding = 5) buffer         DrawCommands{ DrawIndexedIndirectArgs cmds[]; } g_commands;
+layout(std430, set = 1, binding = 6) readonly buffer Batches    { GPUBatchData    batches[];    } g_batches;
+
+// Frustum planes arrive in world space (xyz = normal, w = offset).
+// Signed distance > -radius means the bounds sphere is at least partly inside.
+bool IsVisible(uint objectID)
+{
+	const GPUObjectData obj = g_objects.objects[objectID];
+
+	const vec3 center_local = obj.sphereBounds.xyz;
+	const float radius = obj.sphereBounds.w;
+	const vec3 center_world = (obj.model * vec4(center_local, 1.0)).xyz;
+
+	for (int i = 0; i < 6; ++i)
+	{
+		const vec4 plane = g_scene.u.frustumPlanes[i];
+		if (dot(plane.xyz, center_world) + plane.w < -radius)
+			return false;
+	}
+	return true;
+}
+
+void main()
+{
+	const uint gid = gl_GlobalInvocationID.x;
+	if (gid >= g_scene.u.counts.x)   // counts.x = object count
+		return;
+
+	// counts.z is the culling switch, so the same pipeline can be A/B compared.
+	if (g_scene.u.counts.z == 0u)
+	{
+		const GPUInstanceData inst = g_candidates.instances[gid];
+		const GPUBatchData batch = g_batches.batches[inst.batchID];
+		const uint slot = atomicAdd(g_commands.cmds[inst.batchID].instanceCount, 1u);
+		if (slot < batch.maxInstanceCount)
+			g_visible.ids[batch.baseInstance + slot] = inst.objectID;
+		return;
+	}
+
+	const GPUInstanceData inst = g_candidates.instances[gid];
+	if (!IsVisible(inst.objectID))
+		return;
+
+	const GPUBatchData batch = g_batches.batches[inst.batchID];
+	const uint slot = atomicAdd(g_commands.cmds[inst.batchID].instanceCount, 1u);
+
+	// Guard against overflowing the reserved slice.
+	if (slot < batch.maxInstanceCount)
+		g_visible.ids[batch.baseInstance + slot] = inst.objectID;
+}
