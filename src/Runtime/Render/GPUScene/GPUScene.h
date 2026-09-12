@@ -86,6 +86,17 @@ public:
 	void BuildBatches(const MeshPool& pool);
 	void BuildDrawCommands(const MeshPool& pool);
 
+	// Whether DrawIndexedIndirectArgs::firstInstance is honoured by the device
+	// (requires the `shaderDrawParameters` feature). When it is, every batch can
+	// be issued as ONE indirect command because gl_InstanceIndex then starts at
+	// firstInstance, so no push constant is needed to locate a batch's slice.
+	//
+	// When it is not, the caller must issue one command per batch and pass the
+	// slice offset some other way. Both paths produce the same visibleIDs[]
+	// layout — only how the shader resolves the instance index differs.
+	Bool GetUseFirstInstance() const { return use_first_instance; }
+	void SetUseFirstInstance(Bool enable) { use_first_instance = enable; }
+
 	// ---- GPU buffers (bind once) ----
 	RHI::Buffer* GetObjectBuffer()   const { return object_buffer; }
 	RHI::Buffer* GetMaterialBuffer() const { return material_buffer; }
@@ -136,6 +147,7 @@ private:
 	RHI::Buffer* batch_buffer    = nullptr;
 
 	Bool is_initialized = false;
+	Bool use_first_instance = false;
 };
 
 MYRENDERER_END_NAMESPACE

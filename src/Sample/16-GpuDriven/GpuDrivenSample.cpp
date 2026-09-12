@@ -110,6 +110,16 @@ void GpuDrivenApp::OnInitScene()
 	GPUSceneManager::Config cfg{};
 	gpu_scene.Initialize(cfg, mesh_pool);
 
+	// GPUDRIVEN_FIRST_INSTANCE=1 switches to the single-command path. It needs
+	// the shaderDrawParameters device feature (requested at device creation when
+	// the GPU reports it); without it firstInstance is ignored and every batch
+	// would resolve its instances against the wrong slice.
+	if (std::getenv("GPUDRIVEN_FIRST_INSTANCE") != nullptr)
+	{
+		gpu_scene.SetUseFirstInstance(true);
+		std::cout << "[GpuDriven] firstInstance path: one indirect command for the scene" << std::endl;
+	}
+
 	const glm::vec3 palette[8] = {
 		{0.90f, 0.35f, 0.35f}, {0.95f, 0.60f, 0.30f}, {0.90f, 0.85f, 0.35f},
 		{0.45f, 0.85f, 0.40f}, {0.35f, 0.75f, 0.85f}, {0.40f, 0.50f, 0.90f},
@@ -261,14 +271,23 @@ void GpuDrivenApp::OnInitScene()
 			in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
 			in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
 
-			// Everything below is per-batch, never per-object — and none of it is
-			// a descriptor binding.
 			const UInt32 stride = static_cast<UInt32>(sizeof(DrawIndexedIndirectArgs));
 			const Vector<GPUBatch>& batches = gpu_scene.GetBatches();
+
+			if (gpu_scene.GetUseFirstInstance())
+			{
+				// shaderDrawParameters is available: gl_InstanceIndex starts at
+				// each command's firstInstance, so the whole scene is ONE
+				// indirect command and zero per-draw state.
+				in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), 0,
+					static_cast<UInt32>(batches.size()), stride);
+				return;
+			}
+
+			// Fallback: no firstInstance support, so one command per batch and
+			// the slice offset rides in a push constant.
 			for (UInt32 b = 0; b < batches.size(); ++b)
 			{
-				// Batch slice offset. Needed only because shaderDrawParameters is
-				// off, so firstInstance in the args is ignored.
 				const UInt32 base = batches[b].base_instance;
 				in_cmd->SetPushConstants(0, sizeof(UInt32), &base);
 				in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), b * stride, 1);
@@ -497,11 +516,21 @@ static Int RunSelfTest()
 	scene.BuildDrawCommands(pool);
 	const Vector<DrawIndexedIndirectArgs>& cmds = scene.GetDrawCommands();
 	Check(cmds.size() == 2, "one indirect command per batch");
+	Check(cmds.size() == 2, "one indirect command per batch");
 	Check(cmds[0].index_count == 3u && cmds[0].instance_count == 3u && cmds[0].first_index == 0u,
 		"command0 matches mesh0 geometry");
 	Check(cmds[1].index_count == 3u && cmds[1].instance_count == 2u && cmds[1].first_index == 3u,
 		"command1 matches mesh1 geometry");
 	Check(cmds[0].vertex_offset == 0 && cmds[1].vertex_offset == 0, "vertexOffset always 0 (rebased)");
+
+	// --- stage 5: firstInstance carries the batch slice ---
+	scene.SetUseFirstInstance(true);
+	scene.BuildDrawCommands(pool);
+	Check(scene.GetDrawCommands()[0].first_instance == 0u, "firstInstance 0 for batch0");
+	Check(scene.GetDrawCommands()[1].first_instance == 3u, "firstInstance 3 for batch1");
+	scene.SetUseFirstInstance(false);
+	scene.BuildDrawCommands(pool);
+	Check(scene.GetDrawCommands()[1].first_instance == 0u, "fallback zeroes firstInstance");
 
 	std::cout << (g_failures == 0 ? "=== ALL PASS ===" : "=== FAILURES ===")
 		<< " failures=" << g_failures << std::endl;

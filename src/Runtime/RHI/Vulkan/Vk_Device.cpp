@@ -96,6 +96,29 @@ void VK_Device::CreateDevice(Bool enable_validation_layers, CONST Vector<UniqueP
 		}
 	}
 
+	// Vulkan 1.1 core feature: `shaderDrawParameters`.
+	//
+	// Without it DrawIndexedIndirectArgs::firstInstance is ignored and
+	// gl_InstanceIndex restarts at 0 for every indirect command, which forces
+	// one draw call per batch plus a push constant carrying the batch offset.
+	// With it, every batch can be issued as a single vkCmdDrawIndexedIndirect
+	// of drawCount = N, because gl_InstanceIndex then includes firstInstance.
+	//
+	// Only shaderDrawParameters is enabled; the rest of core_1_1 stays off. No
+	// standalone 1.1 extension struct (multiview, variable_pointers, ...) is
+	// chained anywhere in this engine, so this does not trip
+	// VUID-VkDeviceCreateInfo-pNext-02830. Chained before core_1_3 below, which
+	// prepends itself and therefore ends up linking to this one.
+	VkPhysicalDeviceVulkan11Features feat_1_1{};
+	feat_1_1.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+	feat_1_1.pNext = nullptr;
+	if (api_version >= VK_API_VERSION_1_1 && gpu_features.core_1_1.shaderDrawParameters == VK_TRUE)
+	{
+		feat_1_1.shaderDrawParameters = VK_TRUE;
+		feat_1_1.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext = &feat_1_1;
+	}
+
 	// Prepend Vulkan 1.3 physical-device features (dynamicRendering, synchronization2)
 	// to the pNext chain. Only chain core_1_3 — core_1_1 and core_1_2 features are
 	// already provided by individual extension structs (DescriptorIndexing, BufferDeviceAddress

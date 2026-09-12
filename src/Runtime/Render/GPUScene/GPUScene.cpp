@@ -294,10 +294,11 @@ void GPUSceneManager::BuildDrawCommands(const MeshPool& pool)
 		args.instance_count = batch.instance_count;
 		args.first_index    = meta.first_index;
 		args.vertex_offset  = meta.vertex_offset;
-		// firstInstance stays 0: the engine does not enable `shaderDrawParameters`,
-		// so it would be ignored. The batch's slice offset travels in a push
-		// constant instead (see gpuscene_object.vert).
-		args.first_instance = 0;
+		// When shaderDrawParameters is available this is what lets all batches go
+		// out as a single indirect command: gl_InstanceIndex starts here instead
+		// of at 0. Without the feature it is ignored, and the caller falls back
+		// to one command per batch plus a push constant.
+		args.first_instance = use_first_instance ? batch.base_instance : 0u;
 		draw_commands_cpu.push_back(args);
 	}
 }
