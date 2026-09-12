@@ -616,6 +616,13 @@ target("RendererSample-Mesh")
     set_group("Sample")
     after_build(MoveResource)
 
+--   GPU Scene / GPU-driven rendering demo (merged mesh pool + full indirect draw)
+target("RendererSample-GpuDriven")
+    CommonProjectSetting()
+    add_files("src/Sample/16-GpuDriven/GpuDrivenSample.cpp")
+    set_group("Sample")
+    after_build(MoveResource)
+
 --   Volumetric Cloud + Atmosphere Demo (Hillaire sky LUTs + Nubis-style raymarched clouds)
 target("RendererSample-VolumetricCloud")
     CommonProjectSetting()
