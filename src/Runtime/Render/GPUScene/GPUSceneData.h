@@ -76,6 +76,13 @@ struct GPUMeshMeta
 	UInt32 lod_offsets[4] = { 0, 0, 0, 0 };                 // 16  reserved for LOD (stage 5)
 };
 
+// ---- Object flags -----------------------------------------------------------
+// Removal is a soft delete: the slot keeps its id (so external references stay
+// valid) and is simply skipped when batches are rebuilt. Actually reclaiming
+// the slot needs a free list plus generation handles — not worth it until
+// scenes churn hard enough to hit kMaxObjects.
+constexpr UInt32 kObjectFlagDeleted = 1u << 0;
+
 // ---- The culling shader's input stream (8 bytes) ---------------------------
 // Mirrors `struct GPUInstanceData` in GPUScene.glsl.
 // One entry per object, built at registration time; only changes when objects

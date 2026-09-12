@@ -3,6 +3,7 @@
 #include "VK_Texture.h"
 #include "RHI/RenderTexture.h"
 #include "Core/ConstDefine.h"
+#include "Core/ConstGlobals.h"
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(RHI)
@@ -161,6 +162,9 @@ BindlessSlotHandle VK_BindlessManager::AllocateTexture2DSlot(VK_Texture* texture
 {
 	if (!is_enabled || !texture) return BindlessSlotHandle{};
 
+	// Recycle slots whose deferral has expired before deciding we are exhausted.
+	ProcessPendingFree2D();
+
 	if (free_head_2d == 0) return BindlessSlotHandle{}; // exhausted
 
 	UInt32 idx = free_head_2d;
@@ -190,8 +194,29 @@ void VK_BindlessManager::FreeTexture2DSlot(BindlessSlotHandle handle)
 	// Bump generation so all existing handles to this slot become stale
 	slot.generation = ((gen + 1) & kHandleGenMask);
 	if (slot.generation == 0) slot.generation = 1;
-	slot.next_free = free_head_2d;
-	free_head_2d = idx;
+
+	// Do NOT push the slot back onto the free list yet. Two frames can be in
+	// flight, and the bindless layout sets UPDATE_AFTER_BIND but not
+	// UPDATE_UNUSED_WHILE_PENDING, so reallocating now would let the next
+	// vkUpdateDescriptorSets overwrite a descriptor that an in-flight command
+	// buffer is still reading. Recycling is deferred instead.
+	pending_free_2d.push_back({ idx, g_frame_number_render_thread.load() });
+}
+
+void VK_BindlessManager::ProcessPendingFree2D()
+{
+	const UInt64 now = g_frame_number_render_thread.load();
+	for (Int i = static_cast<Int>(pending_free_2d.size()) - 1; i >= 0; --i)
+	{
+		if (pending_free_2d[i].frame + kDeferredFreeFrames < now)
+		{
+			const UInt32 idx = pending_free_2d[i].index;
+			slot_meta_2d[idx].next_free = free_head_2d;
+			free_head_2d = idx;
+			pending_free_2d[i] = pending_free_2d.back();
+			pending_free_2d.pop_back();
+		}
+	}
 }
 
 void VK_BindlessManager::UpdateTexture2DSlot(UInt32 index, VK_Texture* texture)
@@ -218,6 +243,8 @@ void VK_BindlessManager::UpdateTexture2DSlot(UInt32 index, VK_Texture* texture)
 BindlessCubeSlotHandle VK_BindlessManager::AllocateTextureCubeSlot(VK_Texture* texture)
 {
 	if (!is_enabled || !texture) return BindlessCubeSlotHandle{};
+
+	ProcessPendingFreeCube();
 
 	if (free_head_cube == 0) return BindlessCubeSlotHandle{}; // exhausted
 
@@ -262,8 +289,25 @@ void VK_BindlessManager::FreeTextureCubeSlot(BindlessCubeSlotHandle handle)
 	// Bump generation
 	slot.generation = ((gen + 1) & kHandleGenMask);
 	if (slot.generation == 0) slot.generation = 1;
-	slot.next_free = free_head_cube;
-	free_head_cube = idx;
+
+	// Deferred recycling, same reasoning as the 2D path.
+	pending_free_cube.push_back({ idx, g_frame_number_render_thread.load() });
+}
+
+void VK_BindlessManager::ProcessPendingFreeCube()
+{
+	const UInt64 now = g_frame_number_render_thread.load();
+	for (Int i = static_cast<Int>(pending_free_cube.size()) - 1; i >= 0; --i)
+	{
+		if (pending_free_cube[i].frame + kDeferredFreeFrames < now)
+		{
+			const UInt32 idx = pending_free_cube[i].index;
+			slot_meta_cube[idx].next_free = free_head_cube;
+			free_head_cube = idx;
+			pending_free_cube[i] = pending_free_cube.back();
+			pending_free_cube.pop_back();
+		}
+	}
 }
 
 VkDescriptorSetLayout VK_BindlessManager::GetLayout() CONST

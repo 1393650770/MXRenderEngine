@@ -68,6 +68,21 @@ protected:
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	Bool is_enabled = false;
 
+	// Deferred slot recycling (see FreeTexture2DSlot).
+	// A freed slot is held back for kDeferredFreeFrames before it can be
+	// reallocated, because two frames can be in flight and the layout only sets
+	// UPDATE_AFTER_BIND — not UPDATE_UNUSED_WHILE_PENDING. Reusing a slot
+	// immediately would rewrite a descriptor an in-flight command buffer is
+	// still sampling, which shows up as objects randomly wearing the wrong
+	// texture. Same pattern as VK_Buffer / VK_Memory deferred frees.
+	static constexpr UInt64 kDeferredFreeFrames = 3;
+
+	struct PendingFree
+	{
+		UInt32 index = 0;
+		UInt64 frame = 0;
+	};
+
 	// 2D slot management — generation-protected sparse array + free list
 	struct SlotEntry2D
 	{
@@ -76,6 +91,7 @@ protected:
 	};
 	Vector<SlotEntry2D> slot_meta_2d;
 	UInt32 free_head_2d = 0;
+	Vector<PendingFree> pending_free_2d;
 
 	// Cube slot management — generation-protected sparse array + free list
 	struct SlotEntryCube
@@ -85,6 +101,12 @@ protected:
 	};
 	Vector<SlotEntryCube> slot_meta_cube;
 	UInt32 free_head_cube = 0;
+	Vector<PendingFree> pending_free_cube;
+
+protected:
+	// Move slots whose deferral has expired back onto the free list.
+	void ProcessPendingFree2D();
+	void ProcessPendingFreeCube();
 
 private:
 #pragma endregion

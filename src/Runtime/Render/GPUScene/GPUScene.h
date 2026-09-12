@@ -54,6 +54,11 @@ public:
 	UInt32 AddMaterial(const GPUMaterialData& material);
 	UInt32 AddObject(const GPUObjectData& object);
 
+	// Soft delete: the id stays valid and the object stops being batched.
+	// Call BuildBatches afterwards to apply it.
+	Bool RemoveObject(UInt32 object_id);
+	Bool IsObjectDeleted(UInt32 object_id) const;
+
 	// ---- CPU-side mutation ----
 	GPUObjectData&       GetObject(UInt32 object_id)       { return objects_cpu[object_id]; }
 	const GPUObjectData& GetObject(UInt32 object_id) const { return objects_cpu[object_id]; }
@@ -100,6 +105,9 @@ public:
 	const Vector<GPUObjectData>& GetObjects() const { return objects_cpu; }
 	UInt32 GetBatchCount() const { return static_cast<UInt32>(batches.size()); }
 	UInt32 GetObjectCount() const { return static_cast<UInt32>(objects_cpu.size()); }
+	// Objects actually submitted for drawing — the number the culling dispatch
+	// must cover, since it indexes the instance stream rather than objects[].
+	UInt32 GetActiveObjectCount() const { return static_cast<UInt32>(instances_cpu.size()); }
 	UInt32 GetMaterialCount() const { return static_cast<UInt32>(materials_cpu.size()); }
 
 private:

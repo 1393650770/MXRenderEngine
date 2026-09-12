@@ -85,6 +85,7 @@ protected:
 	UInt32 frame_index = 0;
 	Float32 elapsed = 0.0f;
 	Bool   culling_enabled = true;
+	Bool   has_pruned = false;
 };
 
 void GpuDrivenApp::OnInitScene()
@@ -188,7 +189,9 @@ void GpuDrivenApp::OnInitScene()
 		},
 		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
 		{
-			const UInt32 count = gpu_scene.GetObjectCount();
+			// Must cover the instance stream, not objects[]: deleted objects are
+			// still in objects[] but never enter the stream.
+			const UInt32 count = gpu_scene.GetActiveObjectCount();
 			if (count == 0) return;
 
 			in_cmd->SetComputePipeline(data.pso);
@@ -293,7 +296,7 @@ void GpuDrivenApp::OnUpdate(float dt)
 	u.camera_position = glm::vec4(scene_view.GetViewLocation(), 1.0f);
 	u.light_dir = glm::vec4(glm::normalize(glm::vec3(0.4f, 0.8f, 0.45f)), 0.0f);
 	ExtractFrustumPlanes(u.view_proj, u.frustum_planes);
-	u.counts.x = gpu_scene.GetObjectCount();
+	u.counts.x = gpu_scene.GetActiveObjectCount();
 	u.counts.y = frame_index++;
 	u.counts.z = culling_enabled ? 1u : 0u;
 	gpu_scene.UploadUniforms();
@@ -302,10 +305,35 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// Geometry fields (indexCount/firstIndex) are untouched by this.
 	gpu_scene.ResetDrawCommands();
 
+	// Stage 4: remove a slice of the scene at runtime. Ids stay valid (soft
+	// delete); rebuilding the batches is all that is needed to apply it.
+	if (!has_pruned && elapsed > 3.0f)
+	{
+		has_pruned = true;
+		UInt32 removed = 0;
+		for (UInt32 i = 0; i < gpu_scene.GetObjectCount(); ++i)
+		{
+			if (gpu_scene.GetObject(i).material_id == 0u)
+			{
+				gpu_scene.RemoveObject(i);
+				++removed;
+			}
+		}
+		gpu_scene.BuildBatches(mesh_pool);
+		gpu_scene.BuildDrawCommands(mesh_pool);
+		gpu_scene.UploadVisibleIDs();
+		gpu_scene.UploadInstances();
+		gpu_scene.UploadBatches();
+		std::cout << "[GpuDriven] pruned " << removed
+			<< " objects -> active=" << gpu_scene.GetActiveObjectCount()
+			<< " batches=" << gpu_scene.GetBatchCount() << std::endl;
+	}
+
 	// Slow spin. Only the 96-byte object record is rewritten — no descriptor
 	// touch, which is the entire point.
 	for (UInt32 i = 0; i < gpu_scene.GetObjectCount(); ++i)
 	{
+		if (gpu_scene.IsObjectDeleted(i)) continue;
 		GPUObjectData& obj = gpu_scene.GetObject(i);
 		const glm::vec3 pos = glm::vec3(obj.model[3]);
 		obj.model = glm::translate(glm::mat4(1.0f), pos)
@@ -439,6 +467,31 @@ static Int RunSelfTest()
 	const Vector<UInt32>& vis2 = scene2.GetVisibleIDs();
 	Check(vis2.size() == 3, "sorted batch keeps every instance");
 	Check(vis2[0] == 1u && vis2[1] == 2u && vis2[2] == 0u, "instances sorted by material id");
+
+	// --- stage 4: soft delete at runtime ---
+	MeshPool pool3;
+	pool3.AddMesh(MakeTrianglePayload());
+	GPUSceneManager scene3;
+	for (UInt32 i = 0; i < 3; ++i)
+	{
+		GPUObjectData obj{};
+		obj.mesh_id = 0;
+		obj.material_id = i;
+		scene3.AddObject(obj);
+	}
+	scene3.BuildBatches(pool3);
+	Check(scene3.GetActiveObjectCount() == 3, "3 active before removal");
+	Check(scene3.RemoveObject(1u), "RemoveObject reports success");
+	Check(scene3.IsObjectDeleted(1u), "removed object is flagged deleted");
+	Check(!scene3.RemoveObject(1u), "removing twice is rejected");
+	scene3.BuildBatches(pool3);
+	Check(scene3.GetActiveObjectCount() == 2, "2 active after removal");
+
+	const Vector<UInt32>& vis3 = scene3.GetVisibleIDs();
+	Check(vis3.size() == 2, "visibleIDs shrank to 2");
+	Bool removed_gone = true;
+	for (UInt32 v : vis3) if (v == 1u) removed_gone = false;
+	Check(removed_gone, "removed object is absent from visibleIDs");
 
 	// --- indirect args ---
 	scene.BuildDrawCommands(pool);

@@ -103,6 +103,19 @@ UInt32 GPUSceneManager::AddObject(const GPUObjectData& object)
 	return static_cast<UInt32>(objects_cpu.size()) - 1u;
 }
 
+Bool GPUSceneManager::RemoveObject(UInt32 object_id)
+{
+	if (object_id >= objects_cpu.size()) return false;
+	if (objects_cpu[object_id].flags & kObjectFlagDeleted) return false;   // already gone
+	objects_cpu[object_id].flags |= kObjectFlagDeleted;
+	return true;
+}
+
+Bool GPUSceneManager::IsObjectDeleted(UInt32 object_id) const
+{
+	if (object_id >= objects_cpu.size()) return false;
+	return (objects_cpu[object_id].flags & kObjectFlagDeleted) != 0u;
+}
 void GPUSceneManager::SetObjectModel(UInt32 object_id, const glm::mat4& model)
 {
 	ENSURE(object_id < objects_cpu.size(), "GPUScene: SetObjectModel out of range");
@@ -194,6 +207,7 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 	Vector<Vector<UInt32>> per_mesh(mesh_count);
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
+		if (objects_cpu[i].flags & kObjectFlagDeleted) continue;   // soft-deleted
 		const UInt32 m = objects_cpu[i].mesh_id;
 		ENSURE(m < mesh_count, "GPUScene: object references an unknown mesh id");
 		if (m < mesh_count)
@@ -252,6 +266,8 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 	instances_cpu.reserve(objects_cpu.size());
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
+		if (objects_cpu[i].flags & kObjectFlagDeleted) continue;   // soft-deleted
+
 		const UInt32 m = objects_cpu[i].mesh_id;
 		GPUInstanceData inst{};
 		inst.object_id = i;
