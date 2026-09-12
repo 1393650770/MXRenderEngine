@@ -423,6 +423,23 @@ static Int RunSelfTest()
 		if (inst.batch_id >= scene.GetBatchCount()) batch_ids_valid = false;
 	Check(batch_ids_valid, "every instance points at a real batch");
 
+	// --- stage 3: instances inside a batch are ordered by material ---
+	MeshPool pool2;
+	pool2.AddMesh(MakeTrianglePayload());
+	GPUSceneManager scene2;
+	const UInt32 materials[3] = { 2u, 0u, 1u };   // deliberately out of order
+	for (UInt32 i = 0; i < 3; ++i)
+	{
+		GPUObjectData obj{};
+		obj.mesh_id = 0;
+		obj.material_id = materials[i];
+		scene2.AddObject(obj);
+	}
+	scene2.BuildBatches(pool2);
+	const Vector<UInt32>& vis2 = scene2.GetVisibleIDs();
+	Check(vis2.size() == 3, "sorted batch keeps every instance");
+	Check(vis2[0] == 1u && vis2[1] == 2u && vis2[2] == 0u, "instances sorted by material id");
+
 	// --- indirect args ---
 	scene.BuildDrawCommands(pool);
 	const Vector<DrawIndexedIndirectArgs>& cmds = scene.GetDrawCommands();

@@ -2,6 +2,7 @@
 #include "RHI/RenderRHI.h"
 #include "RHI/RenderBuffer.h"
 #include "Tool/BufferUtils.h"
+#include <algorithm>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Render)
@@ -189,14 +190,14 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 	const UInt32 mesh_count = pool.GetMeshCount();
 	if (mesh_count == 0 || objects_cpu.empty()) return;
 
-	// Count instances per drawable unit. Iterating mesh ids (not a hash map)
-	// keeps batch ordering deterministic, which the self-test relies on.
-	Vector<UInt32> counts(mesh_count, 0u);
-	for (const GPUObjectData& obj : objects_cpu)
+	// Collect the object ids of each drawable unit.
+	Vector<Vector<UInt32>> per_mesh(mesh_count);
+	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
-		ENSURE(obj.mesh_id < mesh_count, "GPUScene: object references an unknown mesh id");
-		if (obj.mesh_id < mesh_count)
-			counts[obj.mesh_id]++;
+		const UInt32 m = objects_cpu[i].mesh_id;
+		ENSURE(m < mesh_count, "GPUScene: object references an unknown mesh id");
+		if (m < mesh_count)
+			per_mesh[m].push_back(i);
 	}
 
 	// Reserve one contiguous slice of visibleIDs[] per batch, and remember which
@@ -207,41 +208,54 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 	UInt32 cursor = 0u;
 	for (UInt32 m = 0; m < mesh_count; ++m)
 	{
+		if (per_mesh[m].empty()) continue;
+
+		// Stage 3 — parameter merging. Sorting instances by material makes same
+		// material runs contiguous inside visibleIDs[], which is what gives the
+		// bindless texture fetches their locality. Sorting by object id as a
+		// tiebreaker keeps the result deterministic for the self-test.
+		// (shader_id would join this key once more than one shader family exists.)
+		std::stable_sort(per_mesh[m].begin(), per_mesh[m].end(),
+			[this](UInt32 a, UInt32 b)
+			{
+				const UInt32 ma = objects_cpu[a].material_id;
+				const UInt32 mb = objects_cpu[b].material_id;
+				if (ma != mb) return ma < mb;
+				return a < b;
+			});
+
 		base_of[m] = cursor;
-		if (counts[m] > 0)
-		{
-			batch_index_of[m] = static_cast<UInt32>(batches.size());
-			GPUBatch batch{};
-			batch.mesh_id            = m;
-			batch.base_instance      = cursor;
-			batch.instance_count     = counts[m];   // stage 1: everything visible
-			batch.max_instance_count = counts[m];
-			batches.push_back(batch);
-		}
-		cursor += counts[m];
+		batch_index_of[m] = static_cast<UInt32>(batches.size());
+		GPUBatch batch{};
+		batch.mesh_id            = m;
+		batch.base_instance      = cursor;
+		batch.instance_count     = static_cast<UInt32>(per_mesh[m].size());
+		batch.max_instance_count = batch.instance_count;
+		batches.push_back(batch);
+		cursor += static_cast<UInt32>(per_mesh[m].size());
 	}
 
 	visible_ids_cpu.assign(cursor, kInvalidIndex);
+
+	// Scatter each batch's objects into its slice, in the sorted order above.
+	for (UInt32 m = 0; m < mesh_count; ++m)
+	{
+		if (per_mesh[m].empty()) continue;
+		UInt32 slot = 0u;
+		for (UInt32 object_id : per_mesh[m])
+			visible_ids_cpu[base_of[m] + slot++] = object_id;
+	}
+
+	// Instance stream: indexed by object id, so the culling shader can map any
+	// object straight to its batch.
 	instances_cpu.clear();
 	instances_cpu.reserve(objects_cpu.size());
-
-	// Scatter object ids into their batch's slice, and record the reverse
-	// mapping (object -> batch) that the culling shader consumes.
-	// write_cursor counts within a batch's slice (0-based) — the slice offset is
-	// added separately, so it must NOT be seeded from base_of or every write
-	// lands one slice too far (and past the end for the final batch).
-	Vector<UInt32> write_cursor(mesh_count, 0u);
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
-		const UInt32 mesh_id = objects_cpu[i].mesh_id;
-		if (mesh_id >= mesh_count) continue;
-
-		const UInt32 slot = write_cursor[mesh_id]++;
-		visible_ids_cpu[base_of[mesh_id] + slot] = i;
-
+		const UInt32 m = objects_cpu[i].mesh_id;
 		GPUInstanceData inst{};
 		inst.object_id = i;
-		inst.batch_id = batch_index_of[mesh_id];
+		inst.batch_id = (m < mesh_count) ? batch_index_of[m] : kInvalidIndex;
 		instances_cpu.push_back(inst);
 	}
 }
