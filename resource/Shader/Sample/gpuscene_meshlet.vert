@@ -19,6 +19,11 @@
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec2 v_uv;
 layout(location = 2) out flat uint v_material_id;
+// Debug views. Flat because they are per-cluster constants, not per-pixel.
+layout(location = 3) out flat uint v_cluster_id;
+layout(location = 4) out flat uint v_cull_state;
+layout(location = 5) out flat uint v_tri_count;
+layout(location = 6) out flat uint v_lod_level;
 
 layout(std430, set = 0, binding = 0) readonly buffer SceneUniforms { GPUSceneUniformsData u; } g_scene;
 
@@ -39,6 +44,16 @@ layout(std430, set = 1, binding = MESHLET_BIND_PAIRS) readonly buffer ClusterPai
 {
 	GPUClusterInstance items[];
 } g_cluster_instances;
+layout(std430, set = 1, binding = MESHLET_BIND_CLUSTER_DRAWS) readonly buffer ClusterDraws
+{
+	GPUClusterDraw draws[];
+} g_cluster_draws;
+// The culler's decision for this pair. Always written, so the debug views need
+// no extra pass — this stage just forwards it.
+layout(std430, set = 1, binding = MESHLET_BIND_DEBUG) readonly buffer ClusterDebug
+{
+	uint state[];
+} g_cluster_debug;
 layout(std430, set = 1, binding = MESHLET_BIND_VERTICES) readonly buffer VertexData
 {
 	// MeshVertex is 32 bytes: position(3) + normal(3) + uv(2). Read as a flat
@@ -71,4 +86,9 @@ void main()
 	v_normal = mat3(obj.model) * normal;
 	v_uv = uv;
 	v_material_id = obj.materialID;
+
+	v_cluster_id = item.clusterID;
+	v_cull_state = g_cluster_debug.state[pair];
+	v_tri_count = cluster.triangleCount;
+	v_lod_level = g_cluster_draws.draws[item.clusterID].lodLevel;
 }

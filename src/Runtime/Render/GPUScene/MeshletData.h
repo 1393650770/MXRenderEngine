@@ -24,6 +24,34 @@ MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Render)
 MYRENDERER_BEGIN_NAMESPACE(GPUScene)
 
+// ---- Debug views ------------------------------------------------------------
+// GPU-driven pipelines are near-impossible to debug from the outside: the CPU
+// never learns what was rejected, so a missing cluster is indistinguishable from
+// a broken transform. These modes make the decision visible.
+//
+// The key trick: when a debug mode is active the culler emits geometry for EVERY
+// cluster and records what it WOULD have done. Without that you can only inspect
+// the survivors — exactly the half that needs no explanation.
+//
+// Selected through `lodParams.z` in the uniform block (the slot was free, so no
+// struct had to grow).
+enum class ENUM_CLUSTER_DEBUG : UInt32
+{
+	Off = 0,
+	ClusterId = 1,       // hash per cluster — shows how the mesh was partitioned
+	CullState = 2,       // why each cluster survived or was rejected
+	LodLevel = 3,        // which level of detail was chosen
+	MaterialId = 4,      // hash per material — shows batching
+	TriangleDensity = 5, // heat map of triangles per cluster
+};
+
+// Per-pair culling decision, written by the cull shader and read back by the
+// debug pixel shader. Bitwise, so a view can show several at once.
+constexpr UInt32 kClusterCullFrustum = 1u << 0;   // passed the frustum test
+constexpr UInt32 kClusterCullDistance = 1u << 1;  // inside the draw distance
+constexpr UInt32 kClusterCullOcclusion = 1u << 2; // NOT occluded
+constexpr UInt32 kClusterCullDrawn = 1u << 3;     // actually submitted
+
 // Cluster size limits. 64 vertices is the classic value: it keeps the cluster's
 // vertex list inside a single cache line group and lets the local vertex index
 // be expressed in 8 bits if a future packing wants that.

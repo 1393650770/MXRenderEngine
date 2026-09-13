@@ -42,6 +42,13 @@ layout(std430, set = 1, binding = MESHLET_BIND_COMMANDS) buffer ClusterCommands
 	DrawIndexedIndirectArgs cmds[];
 } g_cluster_commands;
 
+// One decision word per pair. Written unconditionally — the debug views read it,
+// and always writing it keeps the culling path free of any mode branch.
+layout(std430, set = 1, binding = MESHLET_BIND_DEBUG) buffer ClusterDebug
+{
+	uint state[];
+} g_cluster_debug;
+
 float HizFetch(int level, ivec2 coord)
 {
 	if (level == 0) return texelFetch(g_hiz0, coord, 0).x;
@@ -115,6 +122,7 @@ void main()
 	// rebuilding the clusters, which would invalidate the bound buffers.
 	if ((obj.flags & 1u) != 0u)   // kObjectFlagDeleted
 	{
+		g_cluster_debug.state[gid] = 0u;   // shows up as "rejected everything"
 		g_cluster_commands.cmds[gid].indexCount = 0u;
 		g_cluster_commands.cmds[gid].instanceCount = 0u;
 		return;
@@ -130,6 +138,10 @@ void main()
 
 	bool visible = true;
 
+	// Start optimistic and clear the bit that actually fails, so the recorded word
+	// says which test rejected the cluster rather than just "some test did".
+	uint flags = GPU_CLUSTER_CULL_FRUSTUM | GPU_CLUSTER_CULL_DISTANCE | GPU_CLUSTER_CULL_OCCLUSION;
+
 	if (g_scene.u.counts.z != 0u)
 	{
 		for (int i = 0; i < 6; ++i)
@@ -138,6 +150,7 @@ void main()
 			if (dot(plane.xyz, center_world) + plane.w < -radius)
 			{
 				visible = false;
+				flags &= ~GPU_CLUSTER_CULL_FRUSTUM;
 				break;
 			}
 		}
@@ -146,15 +159,32 @@ void main()
 		{
 			const float view_z = -(g_scene.u.view * vec4(center_world, 1.0)).z;
 			if (view_z - radius > g_scene.u.hizAndDepth.w)
+			{
 				visible = false;
+				flags &= ~GPU_CLUSTER_CULL_DISTANCE;
+			}
 		}
 
-		if (visible)
-			visible = !Occluded(center_world, radius);
+		if (visible && Occluded(center_world, radius))
+		{
+			visible = false;
+			flags &= ~GPU_CLUSTER_CULL_OCCLUSION;
+		}
 	}
 
-	// Rewrite the geometry: a rejected pair draws nothing. indexCount stays a
-	// multiple of 3 whenever it is non-zero, so the two fields agree.
-	g_cluster_commands.cmds[gid].indexCount = visible ? cluster.triangleCount * 3u : 0u;
-	g_cluster_commands.cmds[gid].instanceCount = visible ? 1u : 0u;
+	if (visible)
+		flags |= GPU_CLUSTER_CULL_DRAWN;
+
+	g_cluster_debug.state[gid] = flags;
+
+	// The cull-state view is only useful if you can see the REJECTED clusters, so
+	// while a debug view is active the geometry is emitted regardless and the
+	// colour carries the decision instead.
+	const bool debug_view = g_scene.u.lodParams.z > 0.5;
+	const bool emit = visible || debug_view;
+
+	// indexCount stays a multiple of 3 whenever it is non-zero, so the two fields
+	// agree.
+	g_cluster_commands.cmds[gid].indexCount = emit ? cluster.triangleCount * 3u : 0u;
+	g_cluster_commands.cmds[gid].instanceCount = emit ? 1u : 0u;
 }

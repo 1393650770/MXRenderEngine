@@ -29,6 +29,7 @@
 #include "RHI/RenderBuffer.h"
 #include <iostream>
 #include <cstdlib>
+#include <cstring>
 
 using namespace MXRender;
 using namespace MXRender::RHI;
@@ -133,6 +134,9 @@ protected:
 	Vector<UInt32> group_heads;               // usable LOD-group LOD0 ids
 	Bool use_meshlet = false;
 	UInt32 hiz_parity = 0;   // which Hi-Z buffer the next draw writes
+	UInt32 debug_mode = 0;   // ENUM_CLUSTER_DEBUG; 0 = normal shading
+	Bool   debug_cycling = false;
+	Float32 debug_timer = 0.0f;
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
 	RHI::Texture* hiz_textures[kHizBuffers][kHizLevels] = {};   // [buffer][level]
@@ -219,6 +223,32 @@ void GpuDrivenApp::OnInitScene()
 		occlusion_enabled = true;
 		std::cout << "[GpuDriven] occlusion culling on" << std::endl;
 	}
+	if (const char* dbg = std::getenv("GPUDRIVEN_DEBUG"))
+	{
+		if (std::strcmp(dbg, "cycle") == 0)
+		{
+			debug_cycling = true;
+			debug_mode = 1;   // start at the first real view
+		}
+		else
+		{
+			debug_mode = static_cast<UInt32>(std::atoi(dbg));
+		}
+		if (debug_mode != 0u && std::getenv("GPUDRIVEN_MESHLET") == nullptr)
+		{
+			// The views describe cluster culling; without the meshlet path there
+			// is nothing to describe.
+			std::cout << "[GpuDriven] cluster debug views need GPUDRIVEN_MESHLET=1 — ignoring\n";
+			debug_mode = 0u;
+			debug_cycling = false;
+		}
+		else
+		{
+			std::cout << "[GpuDriven] debug view " << debug_mode
+				<< (debug_cycling ? " (cycling every 4s)" : "") << std::endl;
+		}
+	}
+
 	if (std::getenv("GPUDRIVEN_MESHLET") != nullptr)
 	{
 		use_meshlet = true;
@@ -534,6 +564,7 @@ void GpuDrivenApp::OnInitScene()
 					srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
 					srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
 					srb->SetResource("g_cluster_commands", meshlet_scene.GetCommandBuffer());
+					srb->SetResource("g_cluster_debug", meshlet_scene.GetClusterDebugBuffer());
 					bind_hiz_levels(srb, b);
 					srb->FlushDescriptorWrites();
 					data.extra_srbs.push_back(srb);
@@ -574,9 +605,10 @@ void GpuDrivenApp::OnInitScene()
 
 				Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
 					"Shader/gpuscene_meshlet.vert.spv");
-				// Same varyings as the object vertex shader, so the MRT pixel shader is shared.
+				// The meshlet pixel shader carries the debug views (the object path
+				// has its own MRT shader without them).
 				Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
-					"Shader/gpuscene_object_mrt.frag.spv");
+					"Shader/gpuscene_meshlet.frag.spv");
 
 				for (UInt32 b = 0; b < kHizBuffers; ++b)
 				{
@@ -604,6 +636,8 @@ void GpuDrivenApp::OnInitScene()
 					srb->SetResource("g_cluster_tris", meshlet_scene.GetTriangleBuffer());
 					srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
 					srb->SetResource("g_vertex_data", mesh_pool.GetVertexBuffer());
+					srb->SetResource("g_cluster_draws", meshlet_scene.GetClusterDrawBuffer());
+					srb->SetResource("g_cluster_debug", meshlet_scene.GetClusterDebugBuffer());
 					srb->FlushDescriptorWrites();
 					data.extra_srbs.push_back(srb);
 				}
@@ -726,11 +760,24 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// the runtime shrink below makes the effect obvious.
 	u.hiz_and_depth = glm::vec4(static_cast<Float32>(GetViewportWidth()),
 		static_cast<Float32>(GetViewportHeight()), 0.1f, draw_distance);
+	// Cycling lets every view be inspected without an input system.
+	if (debug_cycling)
+	{
+		debug_timer += dt;
+		if (debug_timer >= 4.0f)
+		{
+			debug_timer = 0.0f;
+			debug_mode = (debug_mode % 5u) + 1u;   // 1..5, skipping Off
+			std::cout << "[GpuDriven] debug view " << debug_mode << std::endl;
+		}
+	}
+
 	// LOD bands are geometric: level 1 starts past lodBase, level 2 past
 	// lodBase * lodStep, and so on. The grid spans roughly 14 units around the
 	// orbit target and the camera sits ~22 away, so base 20 splits it roughly in
 	// half — enough to see the coarse level take over in the distance.
-	u.lod_params = glm::vec4(20.0f, 2.5f, 0.0f, 0.0f);
+	// z carries the debug view selection (the slot was free, so nothing grew).
+	u.lod_params = glm::vec4(20.0f, 2.5f, static_cast<Float32>(debug_mode), 0.0f);
 	gpu_scene.UploadUniforms();
 
 	// Clear instanceCount so the culling shader can accumulate it again.

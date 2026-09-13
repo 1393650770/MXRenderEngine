@@ -119,6 +119,12 @@ Bool MeshletScene::Build(const MeshPool& pool, const GPUSceneManager& scene,
 		static_cast<UInt32>(cluster_commands.size() * sizeof(DrawIndexedIndirectArgs)),
 		sizeof(DrawIndexedIndirectArgs),
 		ENUM_BUFFER_TYPE::Indirect | ENUM_BUFFER_TYPE::Dynamic);
+	// Always allocated, not just when a debug view is active: the cull shader
+	// writes it unconditionally, which keeps the decision free of any mode
+	// branch and makes the views cost nothing but the bandwidth.
+	cluster_debug_buffer = Tool::BufferUtils::CreateStorageBuffer(
+		static_cast<UInt32>(cluster_instances.size() * sizeof(UInt32)),
+		sizeof(UInt32), ENUM_BUFFER_TYPE::Dynamic);
 
 	// Allocation failure is a recoverable condition, not a programming error, so
 	// this returns false rather than asserting — the same convention MeshLoader
@@ -126,7 +132,8 @@ Bool MeshletScene::Build(const MeshPool& pool, const GPUSceneManager& scene,
 	// CPU mirrors populated with no buffers behind them would make a later query
 	// report clusters that cannot be drawn.
 	if (!cluster_buffer || !cluster_draw_buffer || !vertex_ref_buffer
-		|| !triangle_buffer || !cluster_instance_buffer || !command_buffer)
+		|| !triangle_buffer || !cluster_instance_buffer || !command_buffer
+		|| !cluster_debug_buffer)
 	{
 		std::cerr << "[MeshletScene] buffer allocation failed (clusters="
 			<< build_result.clusters.size() << " pairs=" << cluster_instances.size() << ")" << std::endl;
@@ -156,6 +163,7 @@ void MeshletScene::ReleaseBuffers()
 	delete triangle_buffer;         triangle_buffer = nullptr;
 	delete cluster_instance_buffer; cluster_instance_buffer = nullptr;
 	delete command_buffer;          command_buffer = nullptr;
+	delete cluster_debug_buffer;    cluster_debug_buffer = nullptr;
 }
 
 void MeshletScene::UploadAll()
@@ -183,6 +191,13 @@ void MeshletScene::UploadAll()
 	if (command_buffer && !cluster_commands.empty())
 		Tool::BufferUtils::Upload(command_buffer, cluster_commands.data(),
 			static_cast<UInt32>(cluster_commands.size() * sizeof(DrawIndexedIndirectArgs)));
+
+	if (cluster_debug_buffer && !cluster_instances.empty())
+	{
+		const Vector<UInt32> zeros(cluster_instances.size(), 0u);
+		Tool::BufferUtils::Upload(cluster_debug_buffer, zeros.data(),
+			static_cast<UInt32>(zeros.size() * sizeof(UInt32)));
+	}
 }
 
 void MeshletScene::ResetClusterCommands()

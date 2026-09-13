@@ -72,6 +72,9 @@ public:
 	RHI::Buffer* GetTriangleBuffer() const { return triangle_buffer; }
 	RHI::Buffer* GetClusterInstanceBuffer() const { return cluster_instance_buffer; }
 	RHI::Buffer* GetCommandBuffer() const { return command_buffer; }
+	// One culling-decision word per pair, written by the cull shader. Only read
+	// by the debug views, but always written, so the views need no extra pass.
+	RHI::Buffer* GetClusterDebugBuffer() const { return cluster_debug_buffer; }
 
 	const Vector<GPUClusterInstance>& GetClusterInstances() const { return cluster_instances; }
 	const Vector<DrawIndexedIndirectArgs>& GetCommands() const { return cluster_commands; }
@@ -90,6 +93,7 @@ private:
 	RHI::Buffer* triangle_buffer = nullptr;
 	RHI::Buffer* cluster_instance_buffer = nullptr;
 	RHI::Buffer* command_buffer = nullptr;
+	RHI::Buffer* cluster_debug_buffer = nullptr;
 
 	Bool is_built = false;
 };
