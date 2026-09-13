@@ -109,9 +109,9 @@ RenderCommandFence fence = EnqueueRenderCommand<MyCmdTag>("MyCmd", [=]{ ... });
 
 ## Samples (src/Sample/)
 
-Each sample is a single self-contained cpp with `main()`: a class deriving `MXRender::RenderInterface` overriding `OnInit_Logic / OnShutdown_Logic / OnUpdate / OnRender`, driven by `Window::Run`. `2-Texture/Texture.cpp` is the minimal RenderGraph template; `6-NeuralNetwork/` is the compute-shader reference (`ShaderHelper.h` for compute PSO creation); `7-Fluid2D/` combines both (compute sim + fullscreen draw in one RDG pass); `8-Fluid3D/` is the heavy-compute reference (GPU FLIP water: MAC-grid pressure projection, fixed-point-atomic P2G, GPU free-list particle recycling, screen-space water rendering with foam; 6 RDG passes, retained storage-image textures with manual layout transitions); `9-Ocean/` is FFT spectral waves (compute IFFT chain, storage-buffer export to the graphics PSO, vertex-pulling grid); `10-VolumetricCloud/` is the 3D-texture reference (Hillaire sky LUTs + Nubis-style raymarched clouds: one-shot compute bake of tileable 3D Perlin-Worley noise into `image3D`, per-frame sky-view LUT + half-res cloud march, `sampler3D` reads in compute and fragment stages); `11-Mesh/` is the vertex-input reference (MeshAsset obj load → `Vertex|Dynamic` VB/IB, `vertex_input_layout` PSO, OrbitCameraController + SceneView, DrawIndexed vs DrawIndexedIndirect toggle via I key or `MESHSAMPLE_INDIRECT=1`, built on the SampleApp base).
+Each sample is a single self-contained cpp with `main()`: a class deriving `MXRender::RenderInterface` overriding `OnInit_Logic / OnShutdown_Logic / OnUpdate / OnRender`, driven by `Window::Run`. `2-Texture/Texture.cpp` is the minimal RenderGraph template; `6-NeuralNetwork/` is the compute-shader reference (`ShaderHelper.h` for compute PSO creation); `7-Fluid2D/` combines both (compute sim + fullscreen draw in one RDG pass); `8-Fluid3D/` is the heavy-compute reference (GPU FLIP water: MAC-grid pressure projection, fixed-point-atomic P2G, GPU free-list particle recycling, screen-space water rendering with foam; 6 RDG passes, retained storage-image textures with manual layout transitions); `9-Ocean/` is FFT spectral waves (compute IFFT chain, storage-buffer export to the graphics PSO, vertex-pulling grid); `10-VolumetricCloud/` is the 3D-texture reference (Hillaire sky LUTs + Nubis-style raymarched clouds: one-shot compute bake of tileable 3D Perlin-Worley noise into `image3D`, per-frame sky-view LUT + half-res cloud march, `sampler3D` reads in compute and fragment stages); `11-Mesh/` is the vertex-input reference (MeshAsset obj load → `Vertex|Dynamic` VB/IB, `vertex_input_layout` PSO, OrbitCameraController + SceneView, DrawIndexed vs DrawIndexedIndirect toggle via I key or `MESHSAMPLE_INDIRECT=1`, built on the SampleApp base); `16-GpuDriven/` is the GPU Scene reference (merged mesh pool + batch partitioning + GPU culling writing the indirect args; self-test via `GPUDRIVEN_SELFTEST=1`, see the GPU Scene section below).
 
-New samples should derive `Application::SampleApp` (`src/Runtime/Application/SampleApp.h`) instead of raw `RenderInterface`: it provides the whole `main()` (`SampleApp::RunSample(app, title)`), BackBuffer/DepthStencil retained-resource registration (`GetBackBufferResource()`), `BindBackBufferTarget(cmd)` (SetRenderTarget + clear values), auto `graph.Compile()`, and `SaveGraphDefinition(name, path)`. Subclass hook: `OnInitScene()` (required) / `OnShutdownScene()` — release all GPU resources you own in `OnShutdownScene`; member destruction at end of main() runs AFTER RHIShutdown and trips the buffer-leak assert (use e.g. `MeshAsset::ReleaseBuffers()`). Runtime common utilities (collected from the former per-sample copies): `Tool::ShaderLibrary` (ReadSpirv/LoadShader/CreateComputePSO), `Tool::BufferUtils` (CreateStorageBuffer/CreateDynamicParamBuffer/Upload), `Tool::ComputeUtils::DispatchWithBarrier` (dispatch + the UAV→SRV/UAV→UAV barrier pair), `Render::SceneView` (view/proj matrix set with the unified Vulkan conventions: GLM 0..1 depth + Y-flip baked into proj; include it before any other glm header) + `Application::OrbitCameraController` (LMB rotate / scroll zoom / MMB pan; `Attach()` owns the GLFW scroll callback — don't mix with a manual `glfwSetScrollCallback`).
+New samples should derive `Application::SampleApp` (`src/Runtime/Application/SampleApp.h`)instead of raw `RenderInterface`: it provides the whole `main()` (`SampleApp::RunSample(app, title)`), BackBuffer/DepthStencil retained-resource registration (`GetBackBufferResource()`), `BindBackBufferTarget(cmd)` (SetRenderTarget + clear values), auto `graph.Compile()`, and `SaveGraphDefinition(name, path)`. Subclass hook: `OnInitScene()` (required) / `OnShutdownScene()` — release all GPU resources you own in `OnShutdownScene`; member destruction at end of main() runs AFTER RHIShutdown and trips the buffer-leak assert (use e.g. `MeshAsset::ReleaseBuffers()`). Runtime common utilities (collected from the former per-sample copies): `Tool::ShaderLibrary` (ReadSpirv/LoadShader/CreateComputePSO), `Tool::BufferUtils` (CreateStorageBuffer/CreateDynamicParamBuffer/Upload), `Tool::ComputeUtils::DispatchWithBarrier` (dispatch + the UAV→SRV/UAV→UAV barrier pair), `Render::SceneView` (view/proj matrix set with the unified Vulkan conventions: GLM 0..1 depth + Y-flip baked into proj; include it before any other glm header) + `Application::OrbitCameraController` (LMB rotate / scroll zoom / MMB pan; `Attach()` owns the GLFW scroll callback — don't mix with a manual `glfwSetScrollCallback`).
 
 Adding a sample:
 1. New `src/Sample/X-Name/Name.cpp` (with `main`)
@@ -131,7 +131,9 @@ There is no input system: poll GLFW directly (`glfwGetMouseButton` / `glfwGetCur
 - **Frame sync / threading**: the actual thread mode is **ThreeThread** — `Platform.cpp` (Win) hardcodes `factory.threading_mode = ThreeThread` and `RenderRHI.h`'s factory default is the same; the `g_thread_mode = Single` in ConstGlobals.cpp is overwritten during RHIInit. Two frame command buffers alternate (`write_cb`/`rhi_cb`), each with its own fence, and `Begin()` only waits its OWN fence (= frame N-2), so **two frames can be in flight**: frame N's CPU work can overlap frame N-1's GPU execution. Per-frame `RHIMapBuffer` upload of param buffers inside an execute lambda is the established pattern (Fluid2D/Fluid3D) and tolerable, but is not strictly race-free; per-frame descriptor updates are NOT safe (see SRB bullet). The swapchain prefers MAILBOX whenever available (ignores the vsync flag), which makes frame overlap chronic.
 - **CPU buffer uploads**: `RHIMapBuffer(Write)` on a plain Storage buffer goes through a staging buffer + TRANSFER-queue copy with no cross-queue sync — **unreliable both per-frame and at init** (data may never become visible to the graphics queue). For per-frame params, create the buffer as `Storage | Dynamic`: it allocates host-visible persistently-mapped memory and Map/Unmap becomes a direct write (Fluid3D `fp_buf` pattern). For large init data (particle prefill etc.), write it with a one-shot compute shader instead of uploading (Fluid3D `fluid3d_prefill.comp` pattern). **Vertex/index buffers follow the same rule**: create as `Vertex|Dynamic` / `Index|Dynamic` + `Map/memcpy/Unmap` (the `MeshAsset` pattern, 2026-07) — a plain `Vertex` buffer is device-local and its Map silently takes the unreliable staging path.
 - **Buffer usage bits combine** (2026-07): both translation functions (`Translate_Buffer_usage_type_To_VulkanUsageFlag`, `TranslateBufferTypeToVulkanAllocationFlags`) are bitwise — `Storage|Indirect` (compute-written draw args), `Vertex|Dynamic`, `Uniform|Dynamic` etc. all work. Host visibility is expressed solely by the `Staging`/`Dynamic` bits.
-- **Indirect draws exist** (2026-07): `DrawIndirect / DrawIndexedIndirect / DispatchIndirect` on CommandList (args structs `DrawIndirectArgs` etc. in RenderCommandList.h match the VK layout; the VK impl adds the pooled sub-allocation `GetOffset()`). For GPU-written args use a `Storage|Indirect` buffer and a manual `ResourceBarrier(UnorderedAccess, IndirectArgument)` between the producing pass and the draw. Verified in `11-Mesh`.
+- **Texture usage flags combine** (2026-09): `Translate_Texture_usage_type_To_VulkanUsageFlags` accumulates with `EnumHasAnyFlags` per bit, so `ENUM_TYPE_COLOR_ATTACHMENT | ENUM_TYPE_SHADERRESOURCE` works as expected. Note the swapchain depth attachment is created with `ENUM_TYPE_DEPTH_ATTACHMENT` only — **it carries no `SAMPLED` bit, so depth cannot be sampled**; `ENUM_TYPE_DEPTH_ATTACHMENT_READ_ONLY` does include `SAMPLED` but also forbids writing depth, so it cannot replace it. To read depth, render it into a colour target (see the GPU Scene section).
+- **Bindless slots are recycled with a delay** (2026-09): `FreeTexture2DSlot` / `FreeTextureCubeSlot` push onto a pending list and only return the slot to the free list after `kDeferredFreeFrames` (3). The bindless layout sets `UPDATE_AFTER_BIND` but **not** `UPDATE_UNUSED_WHILE_PENDING`, and two frames can be in flight — reusing a slot immediately would let the next `vkUpdateDescriptorSets` overwrite a descriptor an in-flight command buffer is still sampling (objects randomly rendering with the wrong texture). Pending frees are drained lazily inside `AllocateTexture*Slot`, using `g_frame_number_render_thread` — the same pattern `VK_Buffer` / `VK_Memory` use.
+- **Indirect draws exist** (2026-07): `DrawIndirect / DrawIndexedIndirect / DispatchIndirect` on CommandList (args structs `DrawIndirectArgs` etc. in RenderCommandList.h match the VK layout; the VK impl adds the pooled sub-allocation `GetOffset()`). For GPU-written args use a `Storage|Indirect` buffer and a manual `ResourceBarrier(UnorderedAccess, IndirectArgument)` between the producing pass and the draw. Verified in `11-Mesh`. `firstInstance` is only honoured when `shaderDrawParameters` is enabled — see the GPU Scene section.
 - **Tessellation is wired** (2026-07): set `primitive_topology = PatchList` + `patch_control_points` on the PSO desc (0 treated as 3) and fill `shaders[Shader_Hull/Shader_Domain]`; `pTessellationState` is emitted automatically. `.tesc/.tese` files in resource/Shader compile like any other stage. RT shader stages (`Shader_RayGen..Shader_Callable`, values 16+) are enum+translation placeholders only — no RT pipeline/AS/SBT yet.
 - **After changing struct layout or vtables in widely-included headers** (e.g. adding a PSO desc field), run `xmake build -r <target>` before any runtime test: incremental builds can link stale objects with the old ABI, crashing with 0xC0000005 in unrelated samples (looks exactly like a real bug; cost hours on 2026-07-19).
 - **GPU overload no longer corrupts**: `VK_CommandBuffer::Begin` retries the fence wait until signaled (previously a 1s timeout was ignored and the in-flight command buffer was reset — permanent GPU hang under heavy per-frame workloads, e.g. 100+ dispatches).
@@ -140,6 +142,69 @@ There is no input system: poll GLFW directly (`glfwGetMouseButton` / `glfwGetCur
 - Inside one RDG pass execute lambda, "N × Dispatch then SetRenderTarget + Draw" is valid: Dispatch auto-ends the render pass and both Dispatch and SetRenderTarget flush pending barriers first.
 - Formats missing from `Translate_Texture_Format_To_Vulkan` throw at texture creation; `R32U/R32I` and 3D image type were added 2026-07, but many formats (R16 family int, ASTC, etc.) still fall through. `GetTextureFormatAttribs` has its own separate table (`RenderTexture.cpp`) — a format used with `TransitionTextureState` must exist in BOTH. **R16F/RG16F are in the VK translation but missing from `GetTextureFormatAttribs`** — creating works, first transition throws; use RGBA16F instead (verified). **3D textures are verified in practice** (`10-VolumetricCloud`): `ENUM_TYPE_3D` + `desc.depth`, `image3D` storage writes, `sampler3D` reads in compute and fragment stages all work.
 - Every texture carries a built-in sampler: LINEAR min/mag + **CLAMP_TO_EDGE on all axes** (`VK_Utils::Create_Linear_Sampler`); there is no SamplerDesc/REPEAT option — tiling noise textures must wrap coordinates with `fract()` in the shader.
+
+## GPU Scene (`src/Runtime/Render/GPUScene/`)
+
+GPU-driven rendering: the CPU never decides what is visible, and per-object
+parameters reach the shader as **array reads, not descriptor bindings**.
+
+- **`GPUSceneData.h`** — the CPU/GPU contract. `sizeof` static_asserts guard the
+  layout; the GLSL mirror is `resource/Shader/Global/GPUScene.glsl`. std430,
+  never std140 (std140 forces 16-byte array stride — the 8-byte instance record
+  would double). `alignof` is deliberately NOT asserted: glm only guarantees
+  16-byte `mat4` alignment under `GLM_FORCE_ALIGNED`, which this engine does not
+  set, and only `sizeof` (the array stride) actually matters.
+- **`MeshPool`** — merges every mesh into ONE vertex and ONE index buffer and
+  rebases indices by baseVertex, so a single indirect command can address any
+  drawable unit and `vertexOffset` stays 0.
+- **`GPUSceneManager`** — owns the retained buffers (objects / materials / meshes
+  / visibleIDs / instances / drawCommands / uniforms / batches), partitions
+  objects into one batch per drawable unit, sorts instances inside a batch by
+  material (texture locality), and keeps `visibleIDs[]` as one contiguous slice
+  per batch.
+- **Binding model** — one SRB bound at init, never again. Between draws there is
+  NO descriptor binding: `gl_InstanceIndex → visibleIDs[] → objects[] →
+  materials[] → bindless texture`. Updates are plain buffer writes, which is why
+  this needs no per-frame descriptor pool.
+- **Buffers must be RETAINED**, never RDG transients: the resource pool is LIFO,
+  so a transient's physical identity changes every frame and binding one into a
+  persistent descriptor set corrupts the next frame.
+
+### The shaderDrawParameters dependency
+
+`DrawIndexedIndirectArgs::firstInstance` is IGNORED unless the device feature
+`shaderDrawParameters` is enabled — `gl_InstanceIndex` then restarts at 0 for
+every indirect command. `Vk_Device.cpp` requests it conditionally (only when the
+GPU reports it) through a minimal `VkPhysicalDeviceVulkan11Features`; no
+standalone 1.1 extension struct is chained anywhere else, so it does not trip
+VUID-VkDeviceCreateInfo-pNext-02830.
+
+With it, the whole scene is ONE `DrawIndexedIndirect` with `drawCount = N` and
+zero per-draw state. Without it, the fallback issues one command per batch and
+carries the slice offset in a push constant. **Both paths share one shader and
+one `visibleIDs[]` layout** — only how the instance index is resolved differs.
+`GPUSceneManager::SetUseFirstInstance` selects it; the sample opts in with
+`GPUDRIVEN_FIRST_INSTANCE=1`.
+
+### Culling (`gpuscene_cull.comp`)
+
+Frustum → draw distance → occlusion, in that order. `counts.z` / `counts.w`
+switch culling and occlusion independently so the paths can be A/B compared. The
+shader `atomicAdd`s `instanceCount` straight into the draw-command buffer (that
+is what makes the pipeline GPU-driven) and compacts survivors into each batch's
+reserved slice. The caller only calls `ResetDrawCommands()` per frame.
+
+Occlusion cannot read the engine's depth attachment: it is created with
+`DEPTH_ATTACHMENT` usage only (no `SAMPLED`), `DEPTH_ATTACHMENT_READ_ONLY` would
+forbid depth writes, and the RHI has no per-mip texture views — so a mip-chained
+Hi-Z pyramid is not expressible. A prepass therefore writes depth into an R32F
+colour target, which IS sampleable. The test samples a fixed 4x4 grid over the
+sphere's screen AABB and takes the FARTHEST sample; one unoccluded texel keeps
+the object, so it can only under-cull and never removes something visible.
+
+`GetActiveObjectCount()` — not `GetObjectCount()` — sizes the culling dispatch,
+because soft-deleted objects stay in `objects[]` but never enter the instance
+stream.
 
 ## RenderGraph Architecture
 
@@ -178,6 +243,10 @@ There is no input system: poll GLFW directly (`glfwGetMouseButton` / `glfwGetCur
 | Sample base class | `src/Runtime/Application/SampleApp.h` |
 | Camera (view math / controller) | `src/Runtime/Render/View/SceneView.h`, `src/Runtime/Application/CameraController.h` |
 | Mesh loading | `src/Runtime/Tool/MeshLoader.h`, `src/Runtime/Asset/MeshAsset.h` |
+| GPU Scene data contract | `src/Runtime/Render/GPUScene/GPUSceneData.h` + `resource/Shader/Global/GPUScene.glsl` |
+| GPU Scene manager | `src/Runtime/Render/GPUScene/GPUScene.h`, `MeshPool.h` |
+| GPU Scene sample | `src/Sample/16-GpuDriven/GpuDrivenSample.cpp` |
+| GPU culling / depth prepass shaders | `resource/Shader/Sample/gpuscene_cull.comp`, `gpuscene_depth.vert/.frag` |
 | Shader/buffer/compute helpers | `src/Runtime/Tool/ShaderLibrary.h`, `BufferUtils.h`, `ComputeUtils.h` |
 | Editor main panel | `src/Editor/UI/RenderGraphEditor/RenderGraphPanel.cpp` |
 | Graph validator | `src/Editor/UI/RenderGraphEditor/Services/GraphValidator.h` |
