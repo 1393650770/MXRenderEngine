@@ -195,23 +195,36 @@ is what makes the pipeline GPU-driven) and compacts survivors into each batch's
 reserved slice. The caller only calls `ResetDrawCommands()` per frame.
 
 Occlusion cannot read the engine's depth attachment: it is created with
-`DEPTH_ATTACHMENT` usage only (no `SAMPLED`), `DEPTH_ATTACHMENT_READ_ONLY` would
-forbid depth writes, and the RHI has no per-mip texture views. The depth
-therefore takes a detour: a prepass renders the scene into an R32F colour
-target, and `gpuscene_hiz.comp` reduces it into a Hi-Z pyramid.
+`DEPTH_ATTACHMENT` usage only (no `SAMPLED`), and `DEPTH_ATTACHMENT_READ_ONLY`
+would forbid depth writes. The depth therefore takes a detour: the **main pass
+publishes it as a second render target** (MRT), and `gpuscene_hiz.comp` reduces
+it into a Hi-Z pyramid.
+
+That MRT output is also what removes the depth prepass — the scene is rasterised
+once, not twice. The price is that the occlusion test consumes the **previous
+frame's** pyramid, so the pass order is: cull (frame N-1's pyramid) → draw
+(writes frame N's level 0) → build the rest of frame N's pyramid.
 
 **The pyramid's levels are separate textures, not mip levels** — that is
 precisely what makes it expressible without per-mip views. Five levels, each
-half the previous, built by one dispatch per level with a barrier between them
-(each level depends on the finished result below it). Reduction is MAX
-(farthest), so a coarse level can only under-cull — it never rejects something
-visible. The test picks the level whose texel matches the object's pixel
-footprint and reads four texels, instead of point-sampling a fixed grid.
+half the previous, built by one dispatch per level with a barrier between them.
+Reduction is MAX (farthest), so a coarse level can only under-cull; the one
+frame of lag shows up as occasional over-draw, never as a visual error.
 
-Levels get five distinct bindings on the cull shader rather than a sampler
+Two consequences of the temporal scheme that are easy to get wrong:
+
+- **One pipeline per buffer.** The render pass is baked into the pipeline, so a
+  per-frame render target means a pipeline per target. This only works because
+  the PSO cache keys on the render pass (`HashCombine(desc.GetHash(),
+  hash(render_pass))`) — two pipelines with different targets do not collide.
+- **Read the parity per frame, never capture it.** A lambda capturing
+  `cur_buffer` at init freezes every pass on the init-time parity and silently
+  degrades double buffering to single buffering.
+
+Levels get five distinct bindings on the cull shaders rather than a sampler
 array, because `SetResource` binds by GLSL instance name and does not address
-array elements. The Hi-Z build likewise gets one SRB per level pair — same
-binding names, different source/destination textures.
+array elements. The Hi-Z build likewise gets one SRB per level pair — and two
+sets of them now, one per buffer.
 
 `GetActiveObjectCount()` — not `GetSlotCount()` — sizes the culling dispatch,
 because soft-deleted objects stay in `objects[]` but never enter the instance
@@ -251,18 +264,40 @@ Levels must be single-submesh — a multi-submesh level would break the
 `groupBase + lod` arithmetic, so `AddMeshLODs` rejects it rather than
 mis-indexing silently.
 
-### Not implemented (and why)
+### Meshlets (cluster culling)
 
-- **Meshlet / cluster culling** needs mesh or task shaders. This engine has
-  neither: `Shader_RayGen..Shader_Callable` are enum placeholders and there is no
-  `Shader_Mesh` / `Shader_Task` stage. A compute-expand path is possible but is a
-  project in itself (cluster build, cluster cull, GPU-side triangle expansion).
-- **Temporal (double-buffered) Hi-Z.** The current pyramid is built from the
-  SAME frame's prepass. A temporal variant would drop the prepass geometry pass
-  but introduce one frame of occlusion lag and its popping — a design trade
-  (shading overdraw vs. geometry pass), not a missing feature.
-- **Depth pre-sorting.** Opaque geometry is already resolved by the depth test;
-  sorting only pays off for transparent drawing, which this pipeline has none of.
+`MeshletData.h` / `MeshletBuilder` partition geometry into ~64-vertex clusters
+with model-space bounds; `MeshletScene` expands them into **(cluster, object)
+pairs**. The pair is the unit under test because the same cluster is visible for
+one instance and hidden for another — the model matrix differs.
+
+**No mesh shaders.** The engine has no `Shader_Mesh` / `Shader_Task` stage (only
+the RT enum placeholders), so clusters are drawn by **vertex pulling**: the
+pooled vertex buffer carries the `Storage` bit and doubles as an SSBO source,
+`gl_InstanceIndex` names the pair, `gl_VertexIndex` walks that cluster's triangle
+list, and the PSO declares **no vertex input layout at all**.
+
+`gpuscene_meshlet_cull.comp` reuses the same Hi-Z pyramid at cluster
+granularity. Rejected pairs get zero geometry written into their command rather
+than being removed from the list, for the same reason the object path does:
+there is no indirect-count draw.
+
+Soft-deleted objects are skipped **in the cull shader**, not by rebuilding
+clusters — a rebuild would invalidate buffers already bound into SRBs.
+
+Clustering is sequential, not a spatial optimiser. A quality builder would
+cluster by proximity and add a normal cone for backface culling; sequential
+clusters are already far tighter than the whole mesh, which is what the culler
+needs.
+
+### Deliberately not implemented
+
+- **Depth pre-sorting.** Under this architecture the order of `visibleIDs[]` is
+  decided by the culling shader's `atomicAdd` — it is neither deterministic nor
+  controllable from the CPU, so a CPU-side depth sort would simply be discarded.
+  A GPU-side sort (depth buckets, per-bucket draws) costs more than the early-z
+  it buys, and material order is the more valuable key anyway: texture locality
+  beats depth locality for opaque draws that already pass a depth test.
 
 ## RenderGraph Architecture
 
