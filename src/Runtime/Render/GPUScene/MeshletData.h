@@ -43,6 +43,7 @@ enum class ENUM_CLUSTER_DEBUG : UInt32
 	LodLevel = 3,        // which level of detail was chosen
 	MaterialId = 4,      // hash per material — shows batching
 	TriangleDensity = 5, // heat map of triangles per cluster
+	HizLevel = 6,        // draw the Hi-Z pyramid itself, level from lodParams.w
 };
 
 // Per-pair culling decision, written by the cull shader and read back by the

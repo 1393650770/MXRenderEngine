@@ -135,6 +135,7 @@ protected:
 	Bool use_meshlet = false;
 	UInt32 hiz_parity = 0;   // which Hi-Z buffer the next draw writes
 	UInt32 debug_mode = 0;   // ENUM_CLUSTER_DEBUG; 0 = normal shading
+	UInt32 hiz_debug_level = 2;   // which pyramid level the inspector shows
 	Bool   debug_cycling = false;
 	Float32 debug_timer = 0.0f;
 	Render::SceneView scene_view;
@@ -720,6 +721,72 @@ void GpuDrivenApp::OnInitScene()
 		});
 	hiz_pass->SetIsCullable(false);
 	hiz_pass->SetShaderPath("Shader/gpuscene_hiz");
+
+	// ---- Hi-Z inspector (debug overlay) --------------------------------------
+	// Draws the pyramid itself, so a broken occlusion test can be told apart from
+	// a broken pyramid. It replaces the frame rather than compositing over it:
+	// the pass has to re-bind the target anyway, and a full-screen gradient is
+	// much easier to read without the scene behind it.
+	auto* hiz_debug = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneHizDebug", &graph,
+		RHIGetImmediateCommandList(),
+		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+		{
+			builder.Write(GetBackBufferResource());
+
+			// No vertex input: the full-screen triangle is generated from
+			// gl_VertexIndex inside the shader.
+			Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
+				"Shader/fullscreen.vert.spv");
+			Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
+				"Shader/gpuscene_hiz_debug.frag.spv");
+
+			RenderGraphiPipelineStateDesc pd{};
+			pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+			pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+			pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+			pd.render_targets = { GetBackBuffer() };
+			pd.depth_stencil_view = nullptr;            // overlay; no depth needed
+			pd.raster_state.sample_count = 1;
+			pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::None;
+			pd.depth_stencil_state.depth_test_enable = false;
+			pd.depth_stencil_state.depth_write_enable = false;
+			pd.blend_state.render_targets.resize(1);
+			data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+
+			// One SRB per pyramid so the pass can show either. It shows the one
+			// the cull actually consumed — that is the one whose correctness
+			// decides what gets drawn.
+			for (UInt32 b = 0; b < kHizBuffers; ++b)
+			{
+				ShaderResourceBinding* srb = nullptr;
+				data.pso->CreateShaderResourceBinding(srb, false);
+				srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+				bind_hiz_levels(srb, b);
+				srb->FlushDescriptorWrites();
+				data.extra_srbs.push_back(srb);
+			}
+			delete vs;
+			delete ps;
+		},
+		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+		{
+			if (debug_mode != static_cast<UInt32>(ENUM_CLUSTER_DEBUG::HizLevel)) return;
+
+			// Show the pyramid the cull actually consumed this frame.
+			const UInt32 shown = (hiz_parity + 1u) % kHizBuffers;
+			if (shown >= data.extra_srbs.size()) return;
+
+			BindBackBufferTarget(in_cmd);
+			in_cmd->SetGraphicsPipeline(data.pso);
+			in_cmd->SetShaderResourceBinding(data.extra_srbs[shown]);
+
+			DrawAttribute attr{};
+			attr.vertexCount = 3;
+			attr.instanceCount = 1;
+			in_cmd->Draw(attr);
+		});
+	hiz_debug->SetIsCullable(false);
+	hiz_debug->SetShaderPath("Shader/gpuscene_hiz_debug");
 }
 
 void GpuDrivenApp::OnShutdownScene()
@@ -767,7 +834,7 @@ void GpuDrivenApp::OnUpdate(float dt)
 		if (debug_timer >= 4.0f)
 		{
 			debug_timer = 0.0f;
-			debug_mode = (debug_mode % 5u) + 1u;   // 1..5, skipping Off
+			debug_mode = (debug_mode % 6u) + 1u;   // 1..6, skipping Off
 			std::cout << "[GpuDriven] debug view " << debug_mode << std::endl;
 		}
 	}
@@ -776,8 +843,10 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// lodBase * lodStep, and so on. The grid spans roughly 14 units around the
 	// orbit target and the camera sits ~22 away, so base 20 splits it roughly in
 	// half — enough to see the coarse level take over in the distance.
-	// z carries the debug view selection (the slot was free, so nothing grew).
-	u.lod_params = glm::vec4(20.0f, 2.5f, static_cast<Float32>(debug_mode), 0.0f);
+	// z carries the debug view selection, w the pyramid level for the inspector
+	// (both slots were free, so nothing grew).
+	u.lod_params = glm::vec4(20.0f, 2.5f,
+		static_cast<Float32>(debug_mode), static_cast<Float32>(hiz_debug_level));
 	gpu_scene.UploadUniforms();
 
 	// Clear instanceCount so the culling shader can accumulate it again.

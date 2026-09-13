@@ -51,6 +51,7 @@ struct GPUClusterInstance
 #define GPU_CLUSTER_DEBUG_LOD_LEVEL  3u
 #define GPU_CLUSTER_DEBUG_MATERIAL   4u
 #define GPU_CLUSTER_DEBUG_TRI_DENSITY 5u
+#define GPU_CLUSTER_DEBUG_HIZ_LEVEL  6u
 
 // Mirrors the kClusterCull* bits in MeshletData.h.
 #define GPU_CLUSTER_CULL_FRUSTUM   (1u << 0)
