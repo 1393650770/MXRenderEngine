@@ -91,6 +91,7 @@ protected:
 	Bool   culling_enabled = true;
 	Bool   occlusion_enabled = false;
 	Bool   has_pruned = false;
+	Float32 draw_distance = 1000.0f;
 };
 
 // Shared by the depth prepass and the main pass: same geometry, same index
@@ -429,9 +430,12 @@ void GpuDrivenApp::OnUpdate(float dt)
 	u.counts.y = frame_index++;
 	u.counts.z = culling_enabled ? 1u : 0u;
 	u.counts.w = occlusion_enabled ? 1u : 0u;
-	// xy = depth target size (the cull shader reads it to size its sample grid)
+	// xy = depth target size for the occlusion sample grid,
+	// z  = znear, w = max draw distance (0 disables the distance cull).
+	// The grid spans roughly 34 units, so the default only trims the far edge;
+	// the runtime shrink below makes the effect obvious.
 	u.hiz_and_depth = glm::vec4(static_cast<Float32>(GetViewportWidth()),
-		static_cast<Float32>(GetViewportHeight()), 0.1f, 200.0f);
+		static_cast<Float32>(GetViewportHeight()), 0.1f, draw_distance);
 	gpu_scene.UploadUniforms();
 
 	// Clear instanceCount so the culling shader can accumulate it again.
@@ -461,6 +465,11 @@ void GpuDrivenApp::OnUpdate(float dt)
 			<< " objects -> active=" << gpu_scene.GetActiveObjectCount()
 			<< " batches=" << gpu_scene.GetBatchCount() << std::endl;
 	}
+
+	// Tighten the draw distance afterwards so the distance cull visibly kicks
+	// in — the grid spans ~34 units, so objects at the far edge start dropping.
+	if (has_pruned && draw_distance > 34.0f)
+		draw_distance = glm::max(34.0f, draw_distance - dt * 15.0f);
 
 	// Slow spin. Only the 96-byte object record is rewritten — no descriptor
 	// touch, which is the entire point.

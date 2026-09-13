@@ -113,6 +113,23 @@ bool IsVisible(uint objectID)
 
 	if (!FrustumVisible(center_world, radius))
 		return false;
+
+	// Draw-distance cull. The frustum's far plane already rejects everything
+	// past the projection distance, but that is usually far too generous for
+	// what you actually want drawn — set hizAndDepth.w below the far plane to
+	// drop distant detail. 0 disables it.
+	//
+	// Per-object lodBias is already in the data (GPUObjectData.lodBias) and
+	// scaled by the distance here; with a multi-LOD mesh it would select the
+	// index range instead of only biasing the decision.
+	const float max_draw_distance = g_scene.u.hizAndDepth.w;
+	if (max_draw_distance > 0.0)
+	{
+		const float view_z = -(g_scene.u.view * vec4(center_world, 1.0)).z;
+		if (view_z - radius > max_draw_distance)
+			return false;
+	}
+
 	if (OcclusionCulled(center_world, radius))
 		return false;
 	return true;
