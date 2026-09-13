@@ -340,6 +340,29 @@ because that is the one whose correctness decides what gets drawn.
 Expected side effect: with a view active the scene draws un-culled, so the
 published depth is more complete than normal and the next frame culls less.
 
+### Testing the GPU Scene
+
+The CPU side is covered by a headless binary that needs no device:
+
+    xmake build GPUScene-SelfTest
+    xmake run GPUScene-SelfTest
+
+89 checks over the std430 data contract, MeshPool merging and LOD grouping,
+batching and visibleIDs slicing, draw commands, object slot recycling, and
+meshlet clusters. Those are the parts where an indexing mistake silently
+produces wrong draws rather than an error, and they are all testable without a
+GPU — which matters on a machine that cannot build the renderer at all (see
+"Building", below).
+
+It deliberately does **not** use `CommonProjectSetting()`: that helper adds a
+dependency on the Runtime target, which pulls in `BufferUtils`' real
+implementation — it needs a device and would collide with the test's stubs. Only
+the four GPUScene translation units plus the stubs are linked.
+
+The sample has a matching `RunSelfTest` (`GPUDRIVEN_SELFTEST=1`) that dumps the
+same class of invariants when a device IS available — the natural way to confirm
+CPU and GPU agree once the renderer can actually be run.
+
 ### Deliberately not implemented
 
 - **Depth pre-sorting.** Under this architecture the order of `visibleIDs[]` is
