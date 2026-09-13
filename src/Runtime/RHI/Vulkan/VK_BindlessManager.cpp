@@ -201,6 +201,14 @@ void VK_BindlessManager::FreeTexture2DSlot(BindlessSlotHandle handle)
 	// vkUpdateDescriptorSets overwrite a descriptor that an in-flight command
 	// buffer is still reading. Recycling is deferred instead.
 	pending_free_2d.push_back({ idx, g_frame_number_render_thread.load() });
+
+	// Drain here as well as in Allocate. Allocate-only draining means a caller
+	// that frees slots and then stops allocating never drains at all, leaking
+	// those slots for the lifetime of the manager. Draining on free keeps the
+	// queue moving whenever there is any churn; the entry just pushed cannot be
+	// drained by this call (its deadline is still in the future), so correctness
+	// is unaffected.
+	ProcessPendingFree2D();
 }
 
 void VK_BindlessManager::ProcessPendingFree2D()
@@ -292,6 +300,10 @@ void VK_BindlessManager::FreeTextureCubeSlot(BindlessCubeSlotHandle handle)
 
 	// Deferred recycling, same reasoning as the 2D path.
 	pending_free_cube.push_back({ idx, g_frame_number_render_thread.load() });
+
+	// Same reasoning as the 2D path: draining only on Allocate would strand
+	// slots forever once a caller stops allocating.
+	ProcessPendingFreeCube();
 }
 
 void VK_BindlessManager::ProcessPendingFreeCube()
