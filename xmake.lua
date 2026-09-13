@@ -623,6 +623,27 @@ target("RendererSample-GpuDriven")
     set_group("Sample")
     after_build(MoveResource)
 
+--   GPU Scene unit tests (headless).
+--   Deliberately NOT using CommonProjectSetting(): that helper adds a dependency
+--   on the Runtime target, which would pull in BufferUtils' real implementation.
+--   That implementation needs a device, and it would also collide with the stubs
+--   in the test file. Linking only the four GPUScene translation units plus those
+--   stubs is exactly what lets this run with no GPU at all — which is the point,
+--   since it covers the indexing logic where the real bugs live.
+target("GPUScene-SelfTest")
+    set_kind("binary")
+    set_default(false)
+    set_group("Test")
+    set_languages("clatest", "cxx20")
+    add_files("src/Runtime/Render/GPUScene/Tests/*.cpp")
+    add_files("src/Runtime/Render/GPUScene/MeshPool.cpp")
+    add_files("src/Runtime/Render/GPUScene/GPUScene.cpp")
+    add_files("src/Runtime/Render/GPUScene/MeshletBuilder.cpp")
+    add_files("src/Runtime/Render/GPUScene/MeshletScene.cpp")
+    add_includedirs("src/Runtime", {public = true})
+    add_packages("glm")
+    set_rundir("$(projectdir)")
+
 --   Volumetric Cloud + Atmosphere Demo (Hillaire sky LUTs + Nubis-style raymarched clouds)
 target("RendererSample-VolumetricCloud")
     CommonProjectSetting()
