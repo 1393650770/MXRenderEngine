@@ -290,6 +290,42 @@ cluster by proximity and add a normal cone for backface culling; sequential
 clusters are already far tighter than the whole mesh, which is what the culler
 needs.
 
+### Cluster debug views
+
+Five views (`ENUM_CLUSTER_DEBUG`), selected through `lodParams.z` — the slot was
+unused, so no struct grew. Run the sample with `GPUDRIVEN_DEBUG=cycle` to walk
+them (there is no input system to bind keys to), or `GPUDRIVEN_DEBUG=<0-5>` to
+pin one.
+
+| View | Shows |
+| --- | --- |
+| ClusterId | hash per cluster — how the mesh was partitioned |
+| CullState | red = outside frustum, orange = past draw distance, blue = occluded, green = drawn |
+| LodLevel | one colour per level of detail |
+| MaterialId | hash per material — batching |
+| TriangleDensity | blue→red heat map of triangles per cluster |
+
+Two details carry the whole feature:
+
+- **While any view is active the culler emits EVERY cluster** and records what it
+  would have done. Without that you can only inspect the survivors — and the
+  cull-state view would be uniformly green, which is exactly the case that needs
+  no explanation. A GPU-driven pipeline is otherwise nearly undebuggable: a
+  missing cluster and a broken transform look identical from the CPU.
+- **The decision word is written unconditionally**, one per (cluster, object)
+  pair, with a bit per test. Recording only in debug mode would put a
+  mode-dependent branch in the culling hot path; writing it always keeps that
+  logic pure and makes the views cost nothing but bandwidth. The pair gets the
+  word, not the cluster, because the same cluster can be occluded for one
+  instance and visible for another.
+
+**The depth output stays the REAL depth in every view.** Publishing the debug
+colour instead would feed it into the next frame's pyramid and culling would
+start rejecting geometry at random.
+
+Expected side effect: with a view active the scene draws un-culled, so the
+published depth is more complete than normal and the next frame culls less.
+
 ### Deliberately not implemented
 
 - **Depth pre-sorting.** Under this architecture the order of `visibleIDs[]` is
