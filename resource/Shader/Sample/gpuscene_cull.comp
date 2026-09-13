@@ -20,10 +20,28 @@ layout(local_size_x = 64) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer SceneUniforms { GPUSceneUniformsData u; } g_scene;
 
-// Depth published by the depth prepass (R32F colour target, 0..1, near = 0).
-// The engine's depth attachment is not sampleable, so the prepass exists purely
-// to make this readable.
-layout(set = 0, binding = 1) uniform sampler2D g_depthTex;
+// Hi-Z pyramid built by the prepass + gpuscene_hiz.comp: level 0 is full
+// resolution and each subsequent level halves.
+//
+// The levels are five separate textures rather than one mip chain, because this
+// RHI has no per-mip texture views. They also get five separate bindings rather
+// than a sampler array: the engine's SetResource binds by GLSL instance name and
+// does not address array elements.
+#define GPU_SCENE_HIZ_LEVELS 5
+layout(set = 0, binding = 1) uniform sampler2D g_hiz0;
+layout(set = 0, binding = 2) uniform sampler2D g_hiz1;
+layout(set = 0, binding = 3) uniform sampler2D g_hiz2;
+layout(set = 0, binding = 4) uniform sampler2D g_hiz3;
+layout(set = 0, binding = 5) uniform sampler2D g_hiz4;
+
+float HizFetch(int level, ivec2 coord)
+{
+	if (level == 0) return texelFetch(g_hiz0, coord, 0).x;
+	if (level == 1) return texelFetch(g_hiz1, coord, 0).x;
+	if (level == 2) return texelFetch(g_hiz2, coord, 0).x;
+	if (level == 3) return texelFetch(g_hiz3, coord, 0).x;
+	return texelFetch(g_hiz4, coord, 0).x;
+}
 
 layout(std430, set = 1, binding = 0) readonly buffer Objects    { GPUObjectData   objects[];    } g_objects;
 layout(std430, set = 1, binding = 2) readonly buffer Meshes     { GPUMeshMeta     meshes[];     } g_meshes;
@@ -45,19 +63,20 @@ bool FrustumVisible(vec3 center_world, float radius)
 	return true;
 }
 
-// Occlusion test against the prepass depth.
+// Occlusion test against the Hi-Z pyramid.
 //
-// A fixed 4x4 grid is sampled across the sphere's screen-space AABB and the
-// FARTHEST sample decides. Because one unoccluded texel is enough to keep the
-// object, the test can only ever under-cull — it never removes something that
-// is visible. The trade is precision (a coarse grid can miss a thin occluder)
-// for not needing a full depth pyramid, which this RHI cannot express because
-// it has no per-mip texture views.
+// The object's screen-space AABB picks a pyramid level whose texel roughly
+// matches the AABB's pixel footprint, so four texel reads cover the whole
+// footprint instead of a fixed grid of point samples. That is both cheaper and
+// far less likely to miss a thin occluder.
+//
+// The reduction is MAX, so a level stores the farthest depth in its footprint —
+// which means the test can only under-cull. It never removes something visible.
 bool OcclusionCulled(vec3 center_world, float radius)
 {
 	if (g_scene.u.counts.w == 0u)          // occlusion disabled
 		return false;
-	if (g_scene.u.hizAndDepth.x < 1.0)     // depth target not ready yet
+	if (g_scene.u.hizAndDepth.x < 1.0)     // pyramid not ready yet
 		return false;
 
 	const vec4 cp = g_scene.u.viewProj * vec4(center_world, 1.0);
@@ -79,24 +98,36 @@ bool OcclusionCulled(vec3 center_world, float radius)
 	vec2 uv_min = (ndc - vec2(px, py)) * 0.5 + 0.5;
 	vec2 uv_max = (ndc + vec2(px, py)) * 0.5 + 0.5;
 	if (uv_max.x < 0.0 || uv_max.y < 0.0 || uv_min.x > 1.0 || uv_min.y > 1.0)
-		return false;                      // entirely off-screen: let the frustum test handle it
+		return false;                      // entirely off-screen: the frustum test owns this
 
 	uv_min = clamp(uv_min, vec2(0.0), vec2(1.0));
 	uv_max = clamp(uv_max, vec2(0.0), vec2(1.0));
 
-	const ivec2 size = textureSize(g_depthTex, 0);
-	const ivec2 max_coord = size - ivec2(1);
+	// Level 0's size comes from the uniform (the prepass knew the viewport), and
+	// every coarser level is that shifted right by its index.
+	const vec2 l0_size = g_scene.u.hizAndDepth.xy;
+	const vec2 footprint = (uv_max - uv_min) * l0_size;
+	const float extent = max(footprint.x, footprint.y);
 
+	// floor(log2) maps a footprint to the level where it spans ~1 texel.
+	const int level = clamp(int(floor(log2(max(extent, 1.0)))), 0, GPU_SCENE_HIZ_LEVELS - 1);
+
+	const vec2 level_size = max(floor(l0_size / exp2(float(level))), vec2(1.0));
+	const ivec2 max_coord = ivec2(level_size) - ivec2(1);
+
+	const vec2 lu_min = uv_min * level_size;
+	const vec2 lu_max = uv_max * level_size;
+	const ivec2 c00 = clamp(ivec2(lu_min), ivec2(0), max_coord);
+	const ivec2 c11 = clamp(ivec2(lu_max), ivec2(0), max_coord);
+	const ivec2 c10 = clamp(ivec2(lu_max.x, lu_min.y), ivec2(0), max_coord);
+	const ivec2 c01 = clamp(ivec2(lu_min.x, lu_max.y), ivec2(0), max_coord);
+
+	// Four texel reads cover the whole footprint at this level.
 	float farthest = 0.0;
-	for (int y = 0; y < 4; ++y)
-	{
-		for (int x = 0; x < 4; ++x)
-		{
-			const vec2 uv = mix(uv_min, uv_max, (vec2(float(x), float(y)) + 0.5) * 0.25);
-			const ivec2 coord = clamp(ivec2(uv * vec2(size)), ivec2(0), max_coord);
-			farthest = max(farthest, texelFetch(g_depthTex, coord, 0).x);
-		}
-	}
+	farthest = max(farthest, HizFetch(level, c00));
+	farthest = max(farthest, HizFetch(level, c11));
+	farthest = max(farthest, HizFetch(level, c10));
+	farthest = max(farthest, HizFetch(level, c01));
 
 	const float sphere_depth = cp.z / cp.w;
 	// Bias so geometry sitting exactly on its own depth is not culled.

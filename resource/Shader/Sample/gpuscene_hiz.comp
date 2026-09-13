@@ -1,0 +1,47 @@
+#version 460
+
+// Hi-Z build: one 2x2 max reduction per dispatch, producing level N+1 from N.
+//
+// Why a pyramid at all: a flat depth buffer forces the occlusion test to sample
+// a fixed grid across an object's whole screen footprint, which is both
+// expensive and imprecise. With a pyramid the test picks the level whose texel
+// roughly matches the object's screen size and reads four texels instead.
+//
+// Reduction is MAX (farthest), matching the engine's 0..1 depth where 1 is the
+// far plane. A parent holding the farthest child means a coarse-level test can
+// only under-cull — it never rejects something that is actually visible.
+//
+// One dispatch per level rather than a loop, because each level depends on the
+// finished result of the previous one and that needs a real barrier. The levels
+// live in separate textures (not mip levels) because this RHI cannot bind a
+// per-mip view; each dispatch therefore gets its own SRB with the same binding
+// names pointed at different textures.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D g_src;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D g_dst;
+
+void main()
+{
+	const ivec2 src_size = textureSize(g_src, 0);
+
+	// Destination extent is derived rather than queried: imageSize() on a
+	// write-only image is not reliably available, and src/2 is exactly the
+	// dispatch that was issued anyway.
+	const ivec2 dst_size = (src_size + ivec2(1)) / ivec2(2);
+
+	const ivec2 dst = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(dst, dst_size)))
+		return;
+
+	const ivec2 max_src = max(src_size - ivec2(1), ivec2(0));
+	const ivec2 s = dst * 2;
+
+	float farthest = 0.0;
+	farthest = max(farthest, texelFetch(g_src, clamp(s + ivec2(0, 0), ivec2(0), max_src), 0).x);
+	farthest = max(farthest, texelFetch(g_src, clamp(s + ivec2(1, 0), ivec2(0), max_src), 0).x);
+	farthest = max(farthest, texelFetch(g_src, clamp(s + ivec2(0, 1), ivec2(0), max_src), 0).x);
+	farthest = max(farthest, texelFetch(g_src, clamp(s + ivec2(1, 1), ivec2(0), max_src), 0).x);
+
+	imageStore(g_dst, dst, vec4(farthest, 0.0, 0.0, 0.0));
+}

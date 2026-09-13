@@ -35,12 +35,26 @@ using namespace MXRender::Render;
 using namespace MXRender::Application;
 using namespace MXRender::Render::GPUScene;
 
+// Number of Hi-Z levels. Level 0 is full resolution and each level halves, so 5
+// levels covers a 16:1 footprint range — enough that an object's screen extent
+// maps to roughly one texel at some level.
+static constexpr UInt32 kHizLevels = 5;
+
 struct GpuDrivenPassData : public RenderGraphPassDataBase
 {
 	RenderPipelineState*  pso = nullptr;
 	ShaderResourceBinding* srb = nullptr;
+	// Extra SRBs for passes that need more than one binding set (the Hi-Z build
+	// binds a different source/destination pair per level).
+	Vector<ShaderResourceBinding*> extra_srbs;
 	~GpuDrivenPassData() override = default;
-	void Release() override { delete srb; srb = nullptr; }
+	void Release() override
+	{
+		delete srb;
+		srb = nullptr;
+		for (ShaderResourceBinding* s : extra_srbs) delete s;
+		extra_srbs.clear();
+	}
 };
 
 // Gribb-Hartmann plane extraction, adjusted for the engine's 0..1 depth range
@@ -108,7 +122,7 @@ protected:
 	Vector<UInt32> group_heads;               // usable LOD-group LOD0 ids
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
-	RHI::Texture* depth_output = nullptr;   // R32F, sampleable copy of the depth buffer
+	RHI::Texture* hiz_textures[kHizLevels] = {};   // Hi-Z pyramid, level k is half of k-1
 	UInt32 frame_index = 0;
 	Float32 elapsed = 0.0f;
 	Bool   culling_enabled = true;
@@ -193,30 +207,44 @@ void GpuDrivenApp::OnInitScene()
 		std::cout << "[GpuDriven] occlusion culling on" << std::endl;
 	}
 
-	// ---- depth output for the occlusion test --------------------------------
-	// The engine's depth attachment is DEPTH_ATTACHMENT-only and the RHI cannot
-	// bind a per-mip view, so the prepass writes depth into this R32F colour
-	// target instead. Cleared to 1.0 (far plane) so untouched pixels read as
-	// "nothing here" and never cause a false occlusion.
+	// ---- Hi-Z pyramid ---------------------------------------------------------
+	// Level 0 is written by the depth prepass as a colour target; the coarser
+	// levels are produced by gpuscene_hiz.comp. They are separate textures rather
+	// than one mip chain because this RHI cannot bind a per-mip view, and they
+	// are separate bindings rather than a sampler array because SetResource binds
+	// by instance name and does not address array elements.
+	//
+	// Cleared to 1.0 (far plane) so untouched pixels read as "nothing here" and
+	// can never cause a false occlusion.
 	{
 		ENSURE(GetViewportWidth() > 0 && GetViewportHeight() > 0,
 			"GpuDriven: viewport must be sized before scene init");
-		RHI::TextureDesc d{};
-		d.width = GetViewportWidth();
-		d.height = GetViewportHeight();
-		d.format = ENUM_TEXTURE_FORMAT::R32F;
-		d.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
-		d.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT
-			| ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
-		d.mip_level = 1;
-		d.layer_count = 1;
-		d.samples = 1;
-		d.clear_value.color[0] = 1.0f;
-		d.clear_value.color[1] = 1.0f;
-		d.clear_value.color[2] = 1.0f;
-		d.clear_value.color[3] = 1.0f;
-		depth_output = g_render_rhi->CreateTexture(d);
-		ENSURE(depth_output != nullptr, "GpuDriven: failed to create depth output texture");
+
+		const UInt32 view_w = GetViewportWidth();
+		const UInt32 view_h = GetViewportHeight();
+
+		for (UInt32 k = 0; k < kHizLevels; ++k)
+		{
+			RHI::TextureDesc d{};
+			d.width = (view_w >> k) > 0u ? (view_w >> k) : 1u;
+			d.height = (view_h >> k) > 0u ? (view_h >> k) : 1u;
+			d.format = ENUM_TEXTURE_FORMAT::R32F;
+			d.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
+			d.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
+			// Level 0 is rendered into; the rest are compute targets.
+			d.usage |= (k == 0u)
+				? ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT
+				: ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_STORAGE;
+			d.mip_level = 1;
+			d.layer_count = 1;
+			d.samples = 1;
+			d.clear_value.color[0] = 1.0f;
+			d.clear_value.color[1] = 1.0f;
+			d.clear_value.color[2] = 1.0f;
+			d.clear_value.color[3] = 1.0f;
+			hiz_textures[k] = g_render_rhi->CreateTexture(d);
+			ENSURE(hiz_textures[k] != nullptr, "GpuDriven: failed to create a Hi-Z level");
+		}
 	}
 
 	const glm::vec3 palette[8] = {
@@ -293,7 +321,7 @@ void GpuDrivenApp::OnInitScene()
 			pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
 			pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
 			pd.vertex_input_layout = Tool::MeshDataPayload::GetVertexInputLayout();
-			pd.render_targets = { depth_output };
+			pd.render_targets = { hiz_textures[0] };
 			pd.depth_stencil_view = GetDepthStencil();
 			pd.raster_state.sample_count = 1;
 			pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
@@ -314,14 +342,14 @@ void GpuDrivenApp::OnInitScene()
 		},
 		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
 		{
-			if (!depth_output) return;
+			if (!hiz_textures[0]) return;
 
 			// Retained texture, so its layout is managed by hand.
-			in_cmd->TransitionTextureState(depth_output, ENUM_RESOURCE_STATE::RenderTarget);
+			in_cmd->TransitionTextureState(hiz_textures[0], ENUM_RESOURCE_STATE::RenderTarget);
 
-			Vector<Texture*> rtvs = { depth_output };
+			Vector<Texture*> rtvs = { hiz_textures[0] };
 			Vector<ClearValue> clears;
-			clears.push_back(depth_output->GetTextureDesc().clear_value);
+			clears.push_back(hiz_textures[0]->GetTextureDesc().clear_value);
 			if (GetDepthStencil()) clears.push_back(GetDepthStencil()->GetTextureDesc().clear_value);
 			in_cmd->SetRenderTarget(rtvs, GetDepthStencil(), clears, GetDepthStencil() != nullptr);
 
@@ -334,7 +362,60 @@ void GpuDrivenApp::OnInitScene()
 	depth_pass->SetIsCullable(false);
 	depth_pass->SetShaderPath("Shader/gpuscene_depth");
 
-	// ---- 4b. GPU culling pass -------------------------------------------------
+	// ---- 4b. Hi-Z pyramid build -------------------------------------------------
+	// One dispatch per level. Each level depends on the finished result of the
+	// one below it, which is why this is a loop of dispatches with a barrier
+	// between them rather than a single dispatch walking all levels.
+	auto* hiz_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneHiz", &graph,
+		RHIGetImmediateCommandList(),
+		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+		{
+			Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
+				"Shader/gpuscene_hiz.comp.spv");
+			data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
+
+			// One SRB per level pair: same binding names, different textures.
+			for (UInt32 k = 0; k + 1u < kHizLevels; ++k)
+			{
+				ShaderResourceBinding* srb = nullptr;
+				data.pso->CreateShaderResourceBinding(srb, false);
+				srb->SetResource("g_src", hiz_textures[k]);
+				srb->SetResource("g_dst", hiz_textures[k + 1u]);
+				srb->FlushDescriptorWrites();
+				data.extra_srbs.push_back(srb);
+			}
+			delete cs;
+		},
+		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+		{
+			if (!hiz_textures[0]) return;
+
+			// Level 0 was left as a render target by the prepass.
+			in_cmd->TransitionTextureState(hiz_textures[0], ENUM_RESOURCE_STATE::ShaderResource);
+
+			const UInt32 view_w = GetViewportWidth();
+			const UInt32 view_h = GetViewportHeight();
+
+			for (UInt32 k = 0; k + 1u < kHizLevels && k < data.extra_srbs.size(); ++k)
+			{
+				const UInt32 sw = (view_w >> k) > 0u ? (view_w >> k) : 1u;
+				const UInt32 sh = (view_h >> k) > 0u ? (view_h >> k) : 1u;
+
+				in_cmd->SetComputePipeline(data.pso);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[k]);
+				in_cmd->Dispatch((sw + 7u) / 8u, (sh + 7u) / 8u, 1);
+
+				// The level just written is read as a shader resource by the next
+				// dispatch and by the culling pass. Retained texture, so this
+				// barrier is manual — the RDG only covers transients.
+				in_cmd->TransitionTextureState(hiz_textures[k + 1u],
+					ENUM_RESOURCE_STATE::ShaderResource);
+			}
+		});
+	hiz_pass->SetIsCullable(false);
+	hiz_pass->SetShaderPath("Shader/gpuscene_hiz");
+
+	// ---- 4c. GPU culling pass -------------------------------------------------
 	// Runs before the draw pass. It writes instanceCount into the very same
 	// buffer the draw pass then consumes as indirect arguments, so the CPU never
 	// learns which objects survived.
@@ -354,7 +435,21 @@ void GpuDrivenApp::OnInitScene()
 			data.srb->SetResource("g_candidates", gpu_scene.GetInstanceBuffer());
 			data.srb->SetResource("g_commands", gpu_scene.GetDrawCommandBuffer());
 			data.srb->SetResource("g_batches", gpu_scene.GetBatchBuffer());
-			if (depth_output) data.srb->SetResource("g_depthTex", depth_output);
+			for (UInt32 k = 0; k < kHizLevels; ++k)
+			{
+				if (!hiz_textures[k]) continue;
+				// SetResource binds by GLSL instance name, and the shader declares
+				// the levels as five distinct samplers (not an array) precisely
+				// so they can be bound this way.
+				switch (k)
+				{
+				case 0: data.srb->SetResource("g_hiz0", hiz_textures[0]); break;
+				case 1: data.srb->SetResource("g_hiz1", hiz_textures[1]); break;
+				case 2: data.srb->SetResource("g_hiz2", hiz_textures[2]); break;
+				case 3: data.srb->SetResource("g_hiz3", hiz_textures[3]); break;
+				default: data.srb->SetResource("g_hiz4", hiz_textures[4]); break;
+				}
+			}
 			data.srb->FlushDescriptorWrites();
 
 			delete cs;
@@ -366,10 +461,7 @@ void GpuDrivenApp::OnInitScene()
 			const UInt32 count = gpu_scene.GetActiveObjectCount();
 			if (count == 0) return;
 
-			// The prepass wrote this as a render target; the cull shader samples it.
-			if (depth_output)
-				in_cmd->TransitionTextureState(depth_output, ENUM_RESOURCE_STATE::ShaderResource);
-
+			// The Hi-Z pass already left every level in the shader-resource state.
 			in_cmd->SetComputePipeline(data.pso);
 			in_cmd->SetShaderResourceBinding(data.srb);
 			in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
@@ -447,8 +539,11 @@ void GpuDrivenApp::OnShutdownScene()
 	// Release before RHIShutdown — member destruction runs too late.
 	gpu_scene.Shutdown();
 	mesh_pool.Release();
-	delete depth_output;
-	depth_output = nullptr;
+	for (UInt32 k = 0; k < kHizLevels; ++k)
+	{
+		delete hiz_textures[k];
+		hiz_textures[k] = nullptr;
+	}
 }
 
 void GpuDrivenApp::OnUpdate(float dt)
