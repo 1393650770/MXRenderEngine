@@ -196,15 +196,73 @@ reserved slice. The caller only calls `ResetDrawCommands()` per frame.
 
 Occlusion cannot read the engine's depth attachment: it is created with
 `DEPTH_ATTACHMENT` usage only (no `SAMPLED`), `DEPTH_ATTACHMENT_READ_ONLY` would
-forbid depth writes, and the RHI has no per-mip texture views — so a mip-chained
-Hi-Z pyramid is not expressible. A prepass therefore writes depth into an R32F
-colour target, which IS sampleable. The test samples a fixed 4x4 grid over the
-sphere's screen AABB and takes the FARTHEST sample; one unoccluded texel keeps
-the object, so it can only under-cull and never removes something visible.
+forbid depth writes, and the RHI has no per-mip texture views. The depth
+therefore takes a detour: a prepass renders the scene into an R32F colour
+target, and `gpuscene_hiz.comp` reduces it into a Hi-Z pyramid.
 
-`GetActiveObjectCount()` — not `GetObjectCount()` — sizes the culling dispatch,
+**The pyramid's levels are separate textures, not mip levels** — that is
+precisely what makes it expressible without per-mip views. Five levels, each
+half the previous, built by one dispatch per level with a barrier between them
+(each level depends on the finished result below it). Reduction is MAX
+(farthest), so a coarse level can only under-cull — it never rejects something
+visible. The test picks the level whose texel matches the object's pixel
+footprint and reads four texels, instead of point-sampling a fixed grid.
+
+Levels get five distinct bindings on the cull shader rather than a sampler
+array, because `SetResource` binds by GLSL instance name and does not address
+array elements. The Hi-Z build likewise gets one SRB per level pair — same
+binding names, different source/destination textures.
+
+`GetActiveObjectCount()` — not `GetSlotCount()` — sizes the culling dispatch,
 because soft-deleted objects stay in `objects[]` but never enter the instance
 stream.
+
+### Object slots
+
+Objects are addressed by `GPUObjectHandle` (index + generation), never by index
+alone. `RemoveObject` bumps the generation, pushes the slot onto a free list and
+flags it deleted; `AddObject` prefers the free list over growing. A stale handle
+therefore fails `IsObjectAlive()` instead of silently addressing whatever object
+took the slot next. `GetSlotCount()` reports allocated slots (holes included),
+`GetFreeSlotCount()` the recycle stack — the scene can churn indefinitely as
+long as the live count stays under `max_objects`.
+
+Uploads are dirty-tracked: `AddObject` / `SetObjectModel` / `SetObjectBounds` /
+`MarkObjectDirty` queue a slot and `UploadObjects()` walks only those, with one
+map for all scattered ranges. It falls back to a single contiguous copy when
+nothing is tracked, or when more than a quarter of the scene is dirty, since
+scattered writes lose to one memcpy there. An explicit `UploadObjects()` is
+still required after a batch of mutations.
+
+### LOD
+
+`MeshPool::AddMeshLODs` registers levels coarsest-last and lays them out
+**contiguously** in `mesh_metas`, so a level is reached with `groupBase + lod` —
+no second indirection. `BuildBatches` walks LOD *group heads*, not raw mesh ids,
+and emits one batch per level; each level reserves a slice the size of the whole
+group, because which level an instance lands in is only known on the GPU.
+
+The culling shader picks the level from view distance using geometric bands
+(`lodParams.x * lodParams.y^(k-1)`), shifted per object by `obj.lodBias`. A
+single-level group yields exactly one batch and an un-inflated `visibleIDs`, so
+scenes with no LOD assets behave as if LOD did not exist.
+
+Levels must be single-submesh — a multi-submesh level would break the
+`groupBase + lod` arithmetic, so `AddMeshLODs` rejects it rather than
+mis-indexing silently.
+
+### Not implemented (and why)
+
+- **Meshlet / cluster culling** needs mesh or task shaders. This engine has
+  neither: `Shader_RayGen..Shader_Callable` are enum placeholders and there is no
+  `Shader_Mesh` / `Shader_Task` stage. A compute-expand path is possible but is a
+  project in itself (cluster build, cluster cull, GPU-side triangle expansion).
+- **Temporal (double-buffered) Hi-Z.** The current pyramid is built from the
+  SAME frame's prepass. A temporal variant would drop the prepass geometry pass
+  but introduce one frame of occlusion lag and its popping — a design trade
+  (shading overdraw vs. geometry pass), not a missing feature.
+- **Depth pre-sorting.** Opaque geometry is already resolved by the depth test;
+  sorting only pays off for transparent drawing, which this pipeline has none of.
 
 ## RenderGraph Architecture
 
