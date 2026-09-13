@@ -137,10 +137,13 @@ Bool MeshPool::Upload()
 	// Vertex|Dynamic / Index|Dynamic -> host-visible persistently mapped memory.
 	// A plain Vertex buffer is device-local and its Map silently takes the
 	// unreliable staging+TRANSFER path (see CLAUDE.md RHI Gotchas).
+	// Vertex|Storage|Dynamic. Dynamic for the reliable upload path, Storage
+	// because the meshlet vertex-pulling shader reads this same buffer as an
+	// SSBO — usage bits combine, so one buffer serves both roles.
 	RHI::BufferDesc vb_desc;
 	vb_desc.size   = static_cast<UInt32>(vertices.size() * stride);
 	vb_desc.stride = stride;
-	vb_desc.type   = ENUM_BUFFER_TYPE::Vertex | ENUM_BUFFER_TYPE::Dynamic;
+	vb_desc.type   = ENUM_BUFFER_TYPE::Vertex | ENUM_BUFFER_TYPE::Storage | ENUM_BUFFER_TYPE::Dynamic;
 	vertex_buffer  = g_render_rhi->CreateBuffer(vb_desc);
 	ENSURE(vertex_buffer != nullptr, "MeshPool: failed to create merged vertex buffer");
 	if (vertex_buffer)

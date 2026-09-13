@@ -1,0 +1,160 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "../Global/GPUScene.glsl"
+#include "../Global/Meshlet.glsl"
+
+// Cluster-level culling — the fine-grained half of the GPU-driven pipeline.
+//
+// Object-level culling is all-or-nothing: a large mesh is drawn in full if any
+// part of it is visible. This pass tests each ~64-vertex cluster independently,
+// so the off-screen and hidden parts of a mesh are rejected too.
+//
+// Output is written straight into the indirect draw arguments: rejected pairs
+// get zero geometry rather than being removed from the list, because there is no
+// indirect-count draw to shorten it. That mirrors the object path's degradation
+// and keeps the draw count fixed at the pair count.
+//
+// Requires shaderDrawParameters: the vertex shader identifies its cluster from
+// gl_InstanceIndex, which only honours firstInstance when that feature is on.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer SceneUniforms { GPUSceneUniformsData u; } g_scene;
+
+// Hi-Z pyramid, same five levels the object culler uses.
+layout(set = 0, binding = 1) uniform sampler2D g_hiz0;
+layout(set = 0, binding = 2) uniform sampler2D g_hiz1;
+layout(set = 0, binding = 3) uniform sampler2D g_hiz2;
+layout(set = 0, binding = 4) uniform sampler2D g_hiz3;
+layout(set = 0, binding = 5) uniform sampler2D g_hiz4;
+
+layout(std430, set = 1, binding = 0)  readonly buffer Objects { GPUObjectData objects[]; } g_objects;
+layout(std430, set = 1, binding = MESHLET_BIND_CLUSTERS) readonly buffer Clusters
+{
+	GPUCluster clusters[];
+} g_clusters;
+layout(std430, set = 1, binding = MESHLET_BIND_PAIRS) readonly buffer ClusterPairs
+{
+	GPUClusterInstance items[];
+} g_cluster_instances;
+layout(std430, set = 1, binding = MESHLET_BIND_COMMANDS) buffer ClusterCommands
+{
+	DrawIndexedIndirectArgs cmds[];
+} g_cluster_commands;
+
+float HizFetch(int level, ivec2 coord)
+{
+	if (level == 0) return texelFetch(g_hiz0, coord, 0).x;
+	if (level == 1) return texelFetch(g_hiz1, coord, 0).x;
+	if (level == 2) return texelFetch(g_hiz2, coord, 0).x;
+	if (level == 3) return texelFetch(g_hiz3, coord, 0).x;
+	return texelFetch(g_hiz4, coord, 0).x;
+}
+
+// Four texel reads across the sphere's footprint at the level that matches it.
+// MAX reduction means one unoccluded texel keeps the cluster.
+bool Occluded(vec3 center_world, float radius)
+{
+	if (g_scene.u.counts.w == 0u) return false;
+	if (g_scene.u.hizAndDepth.x < 1.0) return false;
+
+	const vec4 cp = g_scene.u.viewProj * vec4(center_world, 1.0);
+	if (cp.w <= 0.0) return false;
+
+	const vec4 cv = g_scene.u.view * vec4(center_world, 1.0);
+	const float view_z = -cv.z;
+	if (view_z <= radius) return false;
+
+	const float near_z = max(view_z - radius, 1e-3);
+	const float px = abs(g_scene.u.viewProj[0][0]) * radius / near_z;
+	const float py = abs(g_scene.u.viewProj[1][1]) * radius / near_z;
+
+	const vec2 ndc = cp.xy / cp.w;
+	vec2 uv_min = (ndc - vec2(px, py)) * 0.5 + 0.5;
+	vec2 uv_max = (ndc + vec2(px, py)) * 0.5 + 0.5;
+	if (uv_max.x < 0.0 || uv_max.y < 0.0 || uv_min.x > 1.0 || uv_min.y > 1.0)
+		return false;
+
+	uv_min = clamp(uv_min, vec2(0.0), vec2(1.0));
+	uv_max = clamp(uv_max, vec2(0.0), vec2(1.0));
+
+	const vec2 l0_size = g_scene.u.hizAndDepth.xy;
+	const vec2 footprint = (uv_max - uv_min) * l0_size;
+	const float extent = max(footprint.x, footprint.y);
+	const int level = clamp(int(floor(log2(max(extent, 1.0)))), 0, 4);
+
+	const vec2 level_size = max(floor(l0_size / exp2(float(level))), vec2(1.0));
+	const ivec2 max_coord = ivec2(level_size) - ivec2(1);
+
+	const ivec2 c00 = clamp(ivec2(uv_min * level_size), ivec2(0), max_coord);
+	const ivec2 c11 = clamp(ivec2(uv_max * level_size), ivec2(0), max_coord);
+	const ivec2 c10 = clamp(ivec2(uv_max.x, uv_min.y * level_size.y), ivec2(0), max_coord);
+	const ivec2 c01 = clamp(ivec2(uv_min.x, uv_max.y * level_size.y), ivec2(0), max_coord);
+
+	float farthest = 0.0;
+	farthest = max(farthest, HizFetch(level, c00));
+	farthest = max(farthest, HizFetch(level, c11));
+	farthest = max(farthest, HizFetch(level, c10));
+	farthest = max(farthest, HizFetch(level, c01));
+
+	return cp.z / cp.w > farthest + 1e-4;
+}
+
+void main()
+{
+	const uint gid = gl_GlobalInvocationID.x;
+	if (gid >= g_cluster_commands.cmds.length())
+		return;
+
+	const GPUClusterInstance item = g_cluster_instances.items[gid];
+	const GPUCluster cluster = g_clusters.clusters[item.clusterID];
+	const GPUObjectData obj = g_objects.objects[item.objectID];
+
+	// Soft-deleted objects stay in objects[] (their slots are recycled later), so
+	// the pair stream can still reference one. Checked here rather than by
+	// rebuilding the clusters, which would invalidate the bound buffers.
+	if ((obj.flags & 1u) != 0u)   // kObjectFlagDeleted
+	{
+		g_cluster_commands.cmds[gid].indexCount = 0u;
+		g_cluster_commands.cmds[gid].instanceCount = 0u;
+		return;
+	}
+
+	// Cluster bounds are model-space, exactly like object bounds, so the same
+	// model transform applies. The uniform scale is taken from the matrix's first
+	// column length — correct for the translate/rotate/uniform-scale transforms
+	// this pipeline uses.
+	const float scale = length(obj.model[0].xyz);
+	const vec3 center_world = (obj.model * vec4(cluster.bounds.xyz, 1.0)).xyz;
+	const float radius = cluster.bounds.w * scale;
+
+	bool visible = true;
+
+	if (g_scene.u.counts.z != 0u)
+	{
+		for (int i = 0; i < 6; ++i)
+		{
+			const vec4 plane = g_scene.u.frustumPlanes[i];
+			if (dot(plane.xyz, center_world) + plane.w < -radius)
+			{
+				visible = false;
+				break;
+			}
+		}
+
+		if (visible && g_scene.u.hizAndDepth.w > 0.0)
+		{
+			const float view_z = -(g_scene.u.view * vec4(center_world, 1.0)).z;
+			if (view_z - radius > g_scene.u.hizAndDepth.w)
+				visible = false;
+		}
+
+		if (visible)
+			visible = !Occluded(center_world, radius);
+	}
+
+	// Rewrite the geometry: a rejected pair draws nothing. indexCount stays a
+	// multiple of 3 whenever it is non-zero, so the two fields agree.
+	g_cluster_commands.cmds[gid].indexCount = visible ? cluster.triangleCount * 3u : 0u;
+	g_cluster_commands.cmds[gid].instanceCount = visible ? 1u : 0u;
+}

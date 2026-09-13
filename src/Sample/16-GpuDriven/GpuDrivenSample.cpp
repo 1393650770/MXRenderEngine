@@ -16,6 +16,7 @@
 #include "Render/GPUScene/GPUSceneData.h"
 #include "Render/GPUScene/MeshPool.h"
 #include "Render/GPUScene/GPUScene.h"
+#include "Render/GPUScene/MeshletScene.h"
 #include "Tool/MeshLoader.h"
 #include "Tool/ShaderLibrary.h"
 #include "Tool/BufferUtils.h"
@@ -118,8 +119,10 @@ protected:
 
 	MeshPool  mesh_pool;
 	GPUSceneManager  gpu_scene;
+	MeshletScene     meshlet_scene;
 	Vector<GPUObjectHandle> object_handles;   // stable across slot recycling
 	Vector<UInt32> group_heads;               // usable LOD-group LOD0 ids
+	Bool use_meshlet = false;
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
 	RHI::Texture* hiz_textures[kHizLevels] = {};   // Hi-Z pyramid, level k is half of k-1
@@ -206,6 +209,17 @@ void GpuDrivenApp::OnInitScene()
 		occlusion_enabled = true;
 		std::cout << "[GpuDriven] occlusion culling on" << std::endl;
 	}
+	if (std::getenv("GPUDRIVEN_MESHLET") != nullptr)
+	{
+		use_meshlet = true;
+		if (!gpu_scene.GetUseFirstInstance())
+		{
+			// The cluster shader identifies its pair through gl_InstanceIndex.
+			// Without firstInstance support every cluster would resolve to pair 0.
+			std::cout << "[GpuDriven] meshlet path needs GPUDRIVEN_FIRST_INSTANCE=1 — ignoring\n";
+			use_meshlet = false;
+		}
+	}
 
 	// ---- Hi-Z pyramid ---------------------------------------------------------
 	// Level 0 is written by the depth prepass as a colour target; the coarser
@@ -291,6 +305,20 @@ void GpuDrivenApp::OnInitScene()
 	gpu_scene.UploadInstances();
 	gpu_scene.UploadBatches();
 	gpu_scene.UploadDrawCommands();
+
+	// ---- meshlet clusters -----------------------------------------------------
+	// Built from the instance stream, so it must follow BuildBatches.
+	if (use_meshlet)
+	{
+		// A cube is 12 triangles, so the default 124-triangle cap would make it a
+		// SINGLE cluster and the cluster pass would have nothing to reject. A
+		// smaller cap forces a real split so the path is exercised. Real geometry
+		// (thousands of triangles) splits naturally at the default cap.
+		meshlet_scene.Build(mesh_pool, gpu_scene, kMeshletMaxVertices, 8u);
+		std::cout << "[GpuDriven] meshlets: clusters=" << meshlet_scene.GetClusterCount()
+			<< " pairs=" << meshlet_scene.GetClusterInstanceCount()
+			<< " commands=" << meshlet_scene.GetCommandCount() << std::endl;
+	}
 
 	std::cout << "[GpuDriven] objects=" << gpu_scene.GetObjectCount()
 		<< " materials=" << gpu_scene.GetMaterialCount()
@@ -477,7 +505,13 @@ void GpuDrivenApp::OnInitScene()
 	cull_pass->SetIsCullable(false);
 	cull_pass->SetShaderPath("Shader/gpuscene_cull");
 
-	// ---- 4b. one pass, one binding, N indirect draws ---------------------------
+	// ---- 4d. object draw pass ---------------------------------------------------
+	// Skipped entirely when the meshlet path is active: cluster culling replaces
+	// object culling, and the cluster draw replaces this draw. The prepass and
+	// grid passes above are shared by both paths.
+	if (!use_meshlet)
+	{
+	// ---- one pass, one binding, N indirect draws ---------------------------
 	auto* pass = graph.AddRenderPass<GpuDrivenPassData>("GpuDrivenPass", &graph,
 		RHIGetImmediateCommandList(),
 		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
@@ -532,12 +566,126 @@ void GpuDrivenApp::OnInitScene()
 		});
 	pass->SetIsCullable(false);
 	pass->SetShaderPath("Shader/gpuscene_object");
+	}
+	else
+	{
+		// ---- 4e. meshlet cluster culling -------------------------------------
+		// Same Hi-Z pyramid as the object culler, but the candidates are
+		// (cluster, object) pairs instead of whole objects. Rejected pairs get
+		// zero geometry written into their command rather than being removed
+		// from the list — there is no indirect-count draw to shorten it.
+		auto* mcull = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneMeshletCull", &graph,
+			RHIGetImmediateCommandList(),
+			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+			{
+				Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
+					"Shader/gpuscene_meshlet_cull.comp.spv");
+				data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
+
+				data.pso->CreateShaderResourceBinding(data.srb, false);
+				data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+				data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+				data.srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
+				data.srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
+				data.srb->SetResource("g_cluster_commands", meshlet_scene.GetCommandBuffer());
+				for (UInt32 k = 0; k < kHizLevels; ++k)
+				{
+					if (!hiz_textures[k]) continue;
+					switch (k)
+					{
+					case 0: data.srb->SetResource("g_hiz0", hiz_textures[0]); break;
+					case 1: data.srb->SetResource("g_hiz1", hiz_textures[1]); break;
+					case 2: data.srb->SetResource("g_hiz2", hiz_textures[2]); break;
+					case 3: data.srb->SetResource("g_hiz3", hiz_textures[3]); break;
+					default: data.srb->SetResource("g_hiz4", hiz_textures[4]); break;
+					}
+				}
+				data.srb->FlushDescriptorWrites();
+				delete cs;
+			},
+			[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+			{
+				const UInt32 count = meshlet_scene.GetCommandCount();
+				if (count == 0) return;
+
+				in_cmd->SetComputePipeline(data.pso);
+				in_cmd->SetShaderResourceBinding(data.srb);
+				in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
+
+				// The culler just wrote the draw arguments.
+				in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
+					ENUM_RESOURCE_STATE::IndirectArgument);
+			});
+		mcull->SetIsCullable(false);
+		mcull->SetShaderPath("Shader/gpuscene_meshlet_cull");
+
+		// ---- 4f. meshlet draw ------------------------------------------------
+		// One command per pair, each instanced once. Vertex pulling reads the
+		// cluster's vertices from a storage buffer, so no vertex buffer is bound
+		// and no input layout is declared.
+		auto* mdraw = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneMeshletDraw", &graph,
+			RHIGetImmediateCommandList(),
+			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+			{
+				builder.Write(GetBackBufferResource());
+				if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
+
+				Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
+					"Shader/gpuscene_meshlet.vert.spv");
+				Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
+					"Shader/gpuscene_object.frag.spv");
+
+				RenderGraphiPipelineStateDesc pd{};
+				pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+				pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+				pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+				// No vertex_input_layout: every attribute is pulled from storage.
+				pd.render_targets = { GetBackBuffer() };
+				pd.depth_stencil_view = GetDepthStencil();
+				pd.raster_state.sample_count = 1;
+				pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
+				pd.depth_stencil_state.depth_test_enable = true;
+				pd.depth_stencil_state.depth_write_enable = true;
+				pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
+				pd.blend_state.render_targets.resize(1);
+				data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+
+				data.pso->CreateShaderResourceBinding(data.srb, false);
+				data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+				data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+				data.srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
+				data.srb->SetResource("g_cluster_refs", meshlet_scene.GetVertexRefBuffer());
+				data.srb->SetResource("g_cluster_tris", meshlet_scene.GetTriangleBuffer());
+				data.srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
+				// The pooled vertex buffer doubles as the pulling source.
+				data.srb->SetResource("g_vertex_data", mesh_pool.GetVertexBuffer());
+				data.srb->FlushDescriptorWrites();
+
+				delete vs;
+				delete ps;
+			},
+			[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+			{
+				const UInt32 count = meshlet_scene.GetCommandCount();
+				if (count == 0) return;
+
+				BindBackBufferTarget(in_cmd);
+				in_cmd->SetGraphicsPipeline(data.pso);
+				in_cmd->SetShaderResourceBinding(data.srb);
+				// No SetVertexBuffer / SetIndexBuffer: the cluster's triangles and
+				// vertices both come from storage buffers.
+				in_cmd->DrawIndexedIndirect(meshlet_scene.GetCommandBuffer(), 0, count);
+			});
+		mdraw->SetIsCullable(false);
+		mdraw->SetShaderPath("Shader/gpuscene_meshlet");
+	}
 }
 
 void GpuDrivenApp::OnShutdownScene()
 {
 	// Release before RHIShutdown — member destruction runs too late.
 	gpu_scene.Shutdown();
+	meshlet_scene.Shutdown();
 	mesh_pool.Release();
 	for (UInt32 k = 0; k < kHizLevels; ++k)
 	{
@@ -577,6 +725,8 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// Clear instanceCount so the culling shader can accumulate it again.
 	// Geometry fields (indexCount/firstIndex) are untouched by this.
 	gpu_scene.ResetDrawCommands();
+	if (use_meshlet)
+		meshlet_scene.ResetClusterCommands();
 
 	// Stage 4: remove a slice of the scene at runtime, then immediately refill
 	// the freed slots — this is what exercises recycling.
@@ -824,6 +974,59 @@ static Int RunSelfTest()
 	Check(flat_scene.GetBatchCount() == 1, "single-level mesh yields one batch");
 	Check(flat_scene.GetVisibleIDs().size() == 3, "single-level visibleIDs is not inflated");
 	Check(flat_pool.GetMeshMetas()[0].lod_count == 1, "single-level head reports 1 level");
+
+	// --- meshlet cluster build ---
+	{
+		// A unit cube: 8 vertices, 12 triangles. Split with a 4-vertex /
+		// 4-triangle cap so the partition has to close several clusters.
+		Vector<Tool::MeshVertex> cube_verts(8);
+		for (UInt32 i = 0; i < 8; ++i)
+		{
+			cube_verts[i].position[0] = (i & 1u) ? 1.0f : 0.0f;
+			cube_verts[i].position[1] = (i & 2u) ? 1.0f : 0.0f;
+			cube_verts[i].position[2] = (i & 4u) ? 1.0f : 0.0f;
+			cube_verts[i].normal[1] = 1.0f;
+		}
+		const UInt32 cube_idx[36] = {
+			0,1,3, 0,3,2,  4,6,7, 4,7,5,  0,4,5, 0,5,1,
+			2,3,7, 2,7,6,  0,2,6, 0,6,4,  1,5,7, 1,7,3
+		};
+		Vector<UInt32> idx(cube_idx, cube_idx + 36);
+
+		MeshletBuilder::Result mr;
+		MeshletBuilder::Build(cube_verts, idx, 0u, 0u, mr, 4u, 4u);
+
+		Check(!mr.clusters.empty(), "meshlet build produced clusters");
+		Check(mr.clusters.size() >= 3u, "12 triangles under a 4-triangle cap needs >= 3 clusters");
+		Check(mr.cluster_draws.size() == mr.clusters.size(), "one draw record per cluster");
+		Check(mr.cluster_draws[0].mesh_id == 0u, "draw records carry the mesh id");
+
+		UInt32 total_tris = 0;
+		Bool sizes_ok = true, refs_ok = true, tris_ok = true, bounds_ok = true;
+		for (const GPUCluster& c : mr.clusters)
+		{
+			if (c.vertex_count == 0u || c.vertex_count > 4u) sizes_ok = false;
+			if (c.triangle_count == 0u || c.triangle_count > 4u) sizes_ok = false;
+			if (c.bounds.w <= 0.0f) bounds_ok = false;      // a cluster must span something
+			total_tris += c.triangle_count;
+
+			for (UInt32 i = 0; i < c.vertex_count; ++i)
+				if (mr.vertex_refs[c.vertex_ref_offset + i] >= 8u) refs_ok = false;
+
+			for (UInt32 i = 0; i < c.triangle_count * 3u; ++i)
+				if (mr.triangles[c.triangle_offset + i] >= c.vertex_count) tris_ok = false;
+		}
+		Check(sizes_ok, "every cluster respects the vertex/triangle caps");
+		Check(bounds_ok, "every cluster got real bounds");
+		Check(refs_ok, "vertex refs point at real vertices");
+		Check(tris_ok, "triangle indices stay inside their own cluster");
+		Check(total_tris == 12u, "no triangle was lost while partitioning");
+
+		// A cluster must be tighter than the mesh, otherwise culling it is no
+		// better than culling the object.
+		const GPUCluster& first = mr.clusters[0];
+		Check(first.vertex_count < 8u, "clusters are proper subsets of the mesh");
+	}
 
 	// --- stage 4: soft delete + slot recycling ---
 	MeshPool pool3;
