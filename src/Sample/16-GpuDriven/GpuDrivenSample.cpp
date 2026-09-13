@@ -67,6 +67,27 @@ static void ExtractFrustumPlanes(const glm::mat4& vp, glm::vec4 out[6])
 	}
 }
 
+// Derives a coarse level from a loaded mesh by keeping a subset of the
+// triangles.
+//
+// This is NOT a simplifier — it drops faces rather than decimating, so the
+// result is visibly incomplete. It exists so the LOD path is driven by real
+// geometry instead of being dead code: with two registered levels the culling
+// shader really does pick between them and really does write into different
+// batch slices. A shipping pipeline would take artist-generated levels (or a
+// mesh simplifier) here; the engine side is identical either way.
+Tool::MeshDataPayload MakeCoarseLOD(const Tool::MeshDataPayload& full)
+{
+	Tool::MeshDataPayload coarse = full;
+	const UInt32 triangle_count = static_cast<UInt32>(full.indices.size() / 3u);
+	const UInt32 keep = triangle_count / 3u;                 // a third of the triangles
+	coarse.indices.resize(keep * 3u);
+
+	if (!coarse.sub_meshes.empty())
+		coarse.sub_meshes[0].index_count = static_cast<UInt32>(coarse.indices.size());
+	return coarse;
+}
+
 class GpuDrivenApp : public Application::SampleApp
 {
 public:
@@ -84,6 +105,7 @@ protected:
 	MeshPool  mesh_pool;
 	GPUSceneManager  gpu_scene;
 	Vector<GPUObjectHandle> object_handles;   // stable across slot recycling
+	Vector<UInt32> group_heads;               // usable LOD-group LOD0 ids
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
 	RHI::Texture* depth_output = nullptr;   // R32F, sampleable copy of the depth buffer
@@ -125,18 +147,30 @@ void GpuDrivenApp::RecordDraws(RHI::CommandList* in_cmd) const
 void GpuDrivenApp::OnInitScene()
 {
 	// ---- 1. merge geometry into one pool -------------------------------------
-	// The same mesh is added twice on purpose: two drawable units means two
-	// batches, which exercises visibleIDs slicing instead of trivially passing
-	// with a single batch.
+	// Two LOD groups so the level selection is actually exercised:
+	//   group 0 = two levels (full + coarse), group 1 = a single level.
+	// A group is addressed by its LOD0 id, and the levels live contiguously
+	// after it — which is what lets the cull shader reach a level with
+	// `groupBase + lod`.
 	Tool::MeshDataPayload payload;
 	const Bool loaded = Tool::MeshLoader::LoadMeshData("Mesh/cube.obj", payload);
 	ENSURE(loaded, "GpuDriven: failed to load Mesh/cube.obj");
 	if (!loaded) return;
 
-	mesh_pool.AddMesh(payload);
-	mesh_pool.AddMesh(payload);
+	Vector<Tool::MeshDataPayload> lod_levels;
+	lod_levels.push_back(payload);
+	lod_levels.push_back(MakeCoarseLOD(payload));
+
+	const Vector<UInt32> lod_ids = mesh_pool.AddMeshLODs(lod_levels);
+	const Vector<UInt32> single_ids = mesh_pool.AddMesh(payload);
+	ENSURE(!lod_ids.empty() && !single_ids.empty(), "GpuDriven: mesh registration failed");
+
+	group_heads.push_back(lod_ids[0]);       // 2 levels
+	group_heads.push_back(single_ids[0]);    // 1 level
+
 	ENSURE(mesh_pool.Upload(), "GpuDriven: failed to upload merged mesh pool");
 	std::cout << "[GpuDriven] drawable units=" << mesh_pool.GetMeshCount()
+		<< " lod groups=" << mesh_pool.GetLODGroupHeads().size()
 		<< " verts=" << mesh_pool.GetVertexCount()
 		<< " indices=" << mesh_pool.GetIndexCount() << std::endl;
 
@@ -213,8 +247,9 @@ void GpuDrivenApp::OnInitScene()
 				GPUObjectData obj{};
 				obj.model = glm::translate(glm::mat4(1.0f), pos)
 					* glm::scale(glm::mat4(1.0f), glm::vec3(0.45f));
-				// Alternate the drawable unit so both batches get instances.
-				obj.mesh_id = static_cast<UInt32>((x + y + z) % 2);
+				// Alternate the LOD group so both shapes get instances. The id is
+				// the group's LOD0 entry, never a mid-level one.
+				obj.mesh_id = group_heads[static_cast<UInt32>((x + y + z) % 2)];
 				obj.material_id = static_cast<UInt32>((x + y + z) % 8);
 				obj.sphere_bounds = mesh_pool.GetMeshMetas()[obj.mesh_id].bounds;
 				object_handles.push_back(gpu_scene.AddObject(obj));
@@ -437,6 +472,11 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// the runtime shrink below makes the effect obvious.
 	u.hiz_and_depth = glm::vec4(static_cast<Float32>(GetViewportWidth()),
 		static_cast<Float32>(GetViewportHeight()), 0.1f, draw_distance);
+	// LOD bands are geometric: level 1 starts past lodBase, level 2 past
+	// lodBase * lodStep, and so on. The grid spans roughly 14 units around the
+	// orbit target and the camera sits ~22 away, so base 20 splits it roughly in
+	// half — enough to see the coarse level take over in the distance.
+	u.lod_params = glm::vec4(20.0f, 2.5f, 0.0f, 0.0f);
 	gpu_scene.UploadUniforms();
 
 	// Clear instanceCount so the culling shader can accumulate it again.
@@ -466,7 +506,7 @@ void GpuDrivenApp::OnUpdate(float dt)
 		for (UInt32 i = 0; i < refill; ++i)
 		{
 			GPUObjectData fresh{};
-			fresh.mesh_id = static_cast<UInt32>(i % 2u);
+			fresh.mesh_id = group_heads[i % 2u];
 			fresh.material_id = 7u;                       // the near-white material
 			fresh.model = glm::translate(glm::mat4(1.0f), glm::vec3(
 				(static_cast<Float32>(i % 8) - 3.5f) * 1.7f,
@@ -635,6 +675,60 @@ static Int RunSelfTest()
 	const Vector<UInt32>& vis2 = scene2.GetVisibleIDs();
 	Check(vis2.size() == 3, "sorted batch keeps every instance");
 	Check(vis2[0] == 1u && vis2[1] == 2u && vis2[2] == 0u, "instances sorted by material id");
+
+	// --- LOD groups ---
+	MeshPool lod_pool;
+	Vector<Tool::MeshDataPayload> lod_levels;
+	lod_levels.push_back(MakeTrianglePayload());
+	lod_levels.push_back(MakeTrianglePayload());
+	const Vector<UInt32> lod_ids = lod_pool.AddMeshLODs(lod_levels);
+
+	Check(lod_ids.size() == 1, "a LOD group reports one id (its LOD0)");
+	Check(lod_pool.GetMeshCount() == 2, "both levels are registered");
+	Check(lod_pool.GetLODGroupHeads().size() == 1, "they form ONE group, not two meshes");
+	Check(lod_pool.GetLODGroupHeads()[0] == lod_ids[0], "the group head is LOD0");
+
+	const Vector<GPUMeshMeta>& lod_metas = lod_pool.GetMeshMetas();
+	Check(lod_metas[lod_ids[0]].lod_count == 2, "head records 2 levels");
+	Check(lod_metas[lod_ids[0]].lod_offsets[0] == lod_ids[0]
+		&& lod_metas[lod_ids[0]].lod_offsets[1] == lod_ids[0] + 1,
+		"levels are contiguous after the head (batch == base + lod)");
+
+	GPUSceneManager lod_scene;
+	for (UInt32 i = 0; i < 4; ++i)
+	{
+		GPUObjectData obj{};
+		obj.mesh_id = lod_ids[0];
+		obj.material_id = i % 2;
+		lod_scene.AddObject(obj);
+	}
+	lod_scene.BuildBatches(lod_pool);
+	Check(lod_scene.GetBatchCount() == 2, "one batch per LOD level");
+	Check(lod_scene.GetBatches()[0].mesh_id == lod_ids[0], "batch0 is LOD0 geometry");
+	Check(lod_scene.GetBatches()[1].mesh_id == lod_ids[0] + 1, "batch1 is LOD1 geometry");
+	Check(lod_scene.GetBatches()[0].max_instance_count == 4
+		&& lod_scene.GetBatches()[1].max_instance_count == 4,
+		"every level reserves the whole group (any instance may land anywhere)");
+	Check(lod_scene.GetVisibleIDs().size() == 8, "visibleIDs reserves a slice per level");
+	Check(lod_scene.GetInstances()[0].batch_id == 0, "instances point at the group base");
+	Check(lod_scene.GetInstances()[3].batch_id == 0, "all instances share the group base");
+
+	// A single-level group must still yield exactly one batch, so scenes with no
+	// LOD assets behave as they did before LOD existed.
+	MeshPool flat_pool;
+	flat_pool.AddMesh(MakeTrianglePayload());
+	GPUSceneManager flat_scene;
+	for (UInt32 i = 0; i < 3; ++i)
+	{
+		GPUObjectData obj{};
+		obj.mesh_id = 0;
+		obj.material_id = i;
+		flat_scene.AddObject(obj);
+	}
+	flat_scene.BuildBatches(flat_pool);
+	Check(flat_scene.GetBatchCount() == 1, "single-level mesh yields one batch");
+	Check(flat_scene.GetVisibleIDs().size() == 3, "single-level visibleIDs is not inflated");
+	Check(flat_pool.GetMeshMetas()[0].lod_count == 1, "single-level head reports 1 level");
 
 	// --- stage 4: soft delete + slot recycling ---
 	MeshPool pool3;

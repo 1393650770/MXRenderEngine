@@ -48,9 +48,10 @@ struct GPUSceneUniformsData
     vec4 cameraPosition;
     vec4 lightDir;
     vec4 frustumPlanes[6];
-    vec4 hizAndDepth;        // xy = hiz size, z = znear, w = zfar
+    vec4 hizAndDepth;        // xy = depth target size, z = znear, w = max draw distance
     uvec4 counts;            // x = objectCount, y = frameIndex, z = culling, w = occlusion
-};                           // 288 bytes
+    vec4 lodParams;          // x = lodBase, y = lodStep
+};                           // 304 bytes
 
 // Mirrors RHI::DrawIndexedIndirectArgs (RenderCommandList.h) byte for byte.
 struct DrawIndexedIndirectArgs

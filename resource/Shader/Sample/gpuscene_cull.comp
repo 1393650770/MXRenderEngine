@@ -103,13 +103,10 @@ bool OcclusionCulled(vec3 center_world, float radius)
 	return sphere_depth > farthest + 1e-4;
 }
 
-bool IsVisible(uint objectID)
+bool IsVisible(uint objectID, vec3 center_world)
 {
 	const GPUObjectData obj = g_objects.objects[objectID];
-
-	const vec3 center_local = obj.sphereBounds.xyz;
 	const float radius = obj.sphereBounds.w;
-	const vec3 center_world = (obj.model * vec4(center_local, 1.0)).xyz;
 
 	if (!FrustumVisible(center_world, radius))
 		return false;
@@ -118,10 +115,6 @@ bool IsVisible(uint objectID)
 	// past the projection distance, but that is usually far too generous for
 	// what you actually want drawn — set hizAndDepth.w below the far plane to
 	// drop distant detail. 0 disables it.
-	//
-	// Per-object lodBias is already in the data (GPUObjectData.lodBias) and
-	// scaled by the distance here; with a multi-LOD mesh it would select the
-	// index range instead of only biasing the decision.
 	const float max_draw_distance = g_scene.u.hizAndDepth.w;
 	if (max_draw_distance > 0.0)
 	{
@@ -135,31 +128,63 @@ bool IsVisible(uint objectID)
 	return true;
 }
 
+// Picks the level of detail for an object from its view distance.
+//
+// Levels are laid out contiguously in meshes[], so the target batch is simply
+// `groupBatch + level` — no second indirection. A single-level group always
+// resolves to 0, which is why scenes with no LOD assets behave exactly as they
+// did before this existed.
+//
+// Thresholds are geometric (base * step^(k-1)) so the bands stay proportional
+// as a scene scales. obj.lodBias shifts the decision per object, which is how a
+// "hero" object can be pinned to high detail while its neighbours drop.
+uint SelectLOD(const GPUObjectData obj, float view_z)
+{
+	const uint lod_count = g_meshes.meshes[obj.meshID].lodCount;
+	if (lod_count <= 1u)
+		return 0u;
+
+	const float bias = obj.lodBias;
+	const float base = g_scene.u.lodParams.x;
+	const float step = g_scene.u.lodParams.y;
+
+	uint lod = 0u;
+	for (uint k = 1u; k < lod_count; ++k)
+	{
+		const float threshold = base * pow(step, float(k) - 1.0);
+		if (view_z + bias > threshold)
+			lod = k;
+	}
+	return lod;
+}
+
 void main()
 {
 	const uint gid = gl_GlobalInvocationID.x;
 	if (gid >= g_scene.u.counts.x)   // counts.x = object count
 		return;
 
-	// counts.z is the culling switch, so the same pipeline can be A/B compared.
-	if (g_scene.u.counts.z == 0u)
-	{
-		const GPUInstanceData inst = g_candidates.instances[gid];
-		const GPUBatchData batch = g_batches.batches[inst.batchID];
-		const uint slot = atomicAdd(g_commands.cmds[inst.batchID].instanceCount, 1u);
-		if (slot < batch.maxInstanceCount)
-			g_visible.ids[batch.baseInstance + slot] = inst.objectID;
-		return;
-	}
-
 	const GPUInstanceData inst = g_candidates.instances[gid];
-	if (!IsVisible(inst.objectID))
+	const GPUObjectData obj = g_objects.objects[inst.objectID];
+
+	const vec3 center_local = obj.sphereBounds.xyz;
+	const vec3 center_world = (obj.model * vec4(center_local, 1.0)).xyz;
+
+	// counts.z == 0 keeps everything, so the culled and unculled paths can be
+	// compared with the same data and the same draw commands.
+	if (g_scene.u.counts.z != 0u && !IsVisible(inst.objectID, center_world))
 		return;
 
-	const GPUBatchData batch = g_batches.batches[inst.batchID];
-	const uint slot = atomicAdd(g_commands.cmds[inst.batchID].instanceCount, 1u);
+	const float view_z = -(g_scene.u.view * vec4(center_world, 1.0)).z;
+	const uint lod = SelectLOD(obj, view_z);
 
-	// Guard against overflowing the reserved slice.
+	// batchID is the object's LOD group base; the level selects the actual batch.
+	const uint batch_index = min(inst.batchID + lod, uint(g_batches.batches.length()) - 1u);
+	const GPUBatchData batch = g_batches.batches[batch_index];
+
+	const uint slot = atomicAdd(g_commands.cmds[batch_index].instanceCount, 1u);
+
+	// Guard against overflowing the slice reserved for this batch.
 	if (slot < batch.maxInstanceCount)
 		g_visible.ids[batch.baseInstance + slot] = inst.objectID;
 }

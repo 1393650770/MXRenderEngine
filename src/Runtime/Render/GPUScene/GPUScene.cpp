@@ -287,38 +287,40 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 {
 	batches.clear();
 	visible_ids_cpu.clear();
+	instances_cpu.clear();
 	draw_commands_cpu.clear();
 
-	const UInt32 mesh_count = pool.GetMeshCount();
-	if (mesh_count == 0 || objects_cpu.empty()) return;
+	const Vector<UInt32>& group_heads = pool.GetLODGroupHeads();
+	const Vector<GPUMeshMeta>& metas = pool.GetMeshMetas();
+	if (group_heads.empty() || metas.empty() || objects_cpu.empty()) return;
 
-	// Collect the object ids of each drawable unit.
-	Vector<Vector<UInt32>> per_mesh(mesh_count);
+	// Collect the object ids of each LOD group. Grouping by head (not by raw
+	// mesh id) is what keeps a multi-level group from being mistaken for several
+	// independent meshes.
+	Vector<Vector<UInt32>> per_group(metas.size());
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
 	{
 		if (objects_cpu[i].flags & kObjectFlagDeleted) continue;   // soft-deleted
 		const UInt32 m = objects_cpu[i].mesh_id;
-		ENSURE(m < mesh_count, "GPUScene: object references an unknown mesh id");
-		if (m < mesh_count)
-			per_mesh[m].push_back(i);
+		ENSURE(m < metas.size(), "GPUScene: object references an unknown mesh id");
+		if (m < metas.size())
+			per_group[m].push_back(i);
 	}
 
-	// Reserve one contiguous slice of visibleIDs[] per batch, and remember which
-	// batch index each mesh ended up in — the culling shader needs it to know
-	// where an instance's output belongs.
-	Vector<UInt32> base_of(mesh_count, 0u);
-	Vector<UInt32> batch_index_of(mesh_count, kInvalidIndex);
+	Vector<UInt32> base_of(metas.size(), 0u);
+	Vector<UInt32> batch_index_of(metas.size(), kInvalidIndex);
 	UInt32 cursor = 0u;
-	for (UInt32 m = 0; m < mesh_count; ++m)
+
+	for (UInt32 head : group_heads)
 	{
-		if (per_mesh[m].empty()) continue;
+		if (head >= metas.size() || per_group[head].empty()) continue;
 
 		// Stage 3 — parameter merging. Sorting instances by material makes same
 		// material runs contiguous inside visibleIDs[], which is what gives the
-		// bindless texture fetches their locality. Sorting by object id as a
-		// tiebreaker keeps the result deterministic for the self-test.
+		// bindless texture fetches their locality. Object id as a tiebreaker
+		// keeps the result deterministic for the self-test.
 		// (shader_id would join this key once more than one shader family exists.)
-		std::stable_sort(per_mesh[m].begin(), per_mesh[m].end(),
+		std::stable_sort(per_group[head].begin(), per_group[head].end(),
 			[this](UInt32 a, UInt32 b)
 			{
 				const UInt32 ma = objects_cpu[a].material_id;
@@ -327,30 +329,42 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 				return a < b;
 			});
 
-		base_of[m] = cursor;
-		batch_index_of[m] = static_cast<UInt32>(batches.size());
-		GPUBatch batch{};
-		batch.mesh_id            = m;
-		batch.base_instance      = cursor;
-		batch.instance_count     = static_cast<UInt32>(per_mesh[m].size());
-		batch.max_instance_count = batch.instance_count;
-		batches.push_back(batch);
-		cursor += static_cast<UInt32>(per_mesh[m].size());
+		// One batch per LOD level. Every level gets a slice the size of the whole
+		// group, because which level an instance lands in depends on its distance
+		// and that is only known on the GPU. The shader picks `batchBase + lod`,
+		// which works because the levels are contiguous in mesh_metas.
+		const UInt32 lod_count = (metas[head].lod_count == 0u) ? 1u : metas[head].lod_count;
+		const UInt32 group_size = static_cast<UInt32>(per_group[head].size());
+
+		base_of[head] = cursor;
+		batch_index_of[head] = static_cast<UInt32>(batches.size());
+
+		for (UInt32 k = 0; k < lod_count; ++k)
+		{
+			GPUBatch batch{};
+			batch.mesh_id            = metas[head].lod_offsets[k];
+			batch.base_instance      = cursor;
+			batch.instance_count     = group_size;   // worst case: everything lands here
+			batch.max_instance_count = group_size;
+			batches.push_back(batch);
+			cursor += group_size;
+		}
 	}
 
 	visible_ids_cpu.assign(cursor, kInvalidIndex);
 
-	// Scatter each batch's objects into its slice, in the sorted order above.
-	for (UInt32 m = 0; m < mesh_count; ++m)
+	// Seed the LOD0 slices on the CPU. The culling shader overwrites all of them
+	// every frame; this only matters if the scene is drawn without a cull pass.
+	for (UInt32 head : group_heads)
 	{
-		if (per_mesh[m].empty()) continue;
+		if (head >= metas.size() || per_group[head].empty()) continue;
 		UInt32 slot = 0u;
-		for (UInt32 object_id : per_mesh[m])
-			visible_ids_cpu[base_of[m] + slot++] = object_id;
+		for (UInt32 object_id : per_group[head])
+			visible_ids_cpu[base_of[head] + slot++] = object_id;
 	}
 
-	// Instance stream: indexed by object id, so the culling shader can map any
-	// object straight to its batch.
+	// Instance stream: indexed by object id. batch_id is the group's FIRST level
+	// — the shader adds the selected LOD level to reach the real batch.
 	instances_cpu.clear();
 	instances_cpu.reserve(objects_cpu.size());
 	for (UInt32 i = 0; i < objects_cpu.size(); ++i)
@@ -360,7 +374,7 @@ void GPUSceneManager::BuildBatches(const MeshPool& pool)
 		const UInt32 m = objects_cpu[i].mesh_id;
 		GPUInstanceData inst{};
 		inst.object_id = i;
-		inst.batch_id = (m < mesh_count) ? batch_index_of[m] : kInvalidIndex;
+		inst.batch_id = (m < metas.size()) ? batch_index_of[m] : kInvalidIndex;
 		instances_cpu.push_back(inst);
 	}
 }

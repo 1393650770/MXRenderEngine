@@ -35,6 +35,21 @@ public:
 	// (single-material models return exactly one entry).
 	Vector<UInt32> AddMesh(const Tool::MeshDataPayload& payload);
 
+	// Append a mesh with several levels of detail, coarsest last.
+	//
+	// The levels are laid out CONTIGUOUSLY in mesh_metas: level k of a group
+	// whose first id is `base` is `base + k`. That is what lets the culling
+	// shader pick a level with a single add (`batchBase + lod`) instead of
+	// carrying another indirection through a second buffer.
+	//
+	// payloads[0] is LOD0 and must be the full-detail version; the returned id
+	// is LOD0's. Single-entry calls are identical to AddMesh.
+	Vector<UInt32> AddMeshLODs(const Vector<Tool::MeshDataPayload>& payloads);
+
+	// First mesh id of every LOD group. BuildBatches walks these rather than all
+	// of mesh_metas, so a multi-level group is not mistaken for several meshes.
+	const Vector<UInt32>& GetLODGroupHeads() const { return lod_group_heads; }
+
 	// Allocate + fill the merged buffers. Call once, after the last AddMesh.
 	Bool Upload();
 	void Release();
@@ -56,6 +71,7 @@ private:
 	Vector<Tool::MeshVertex> vertices;
 	Vector<UInt32>           indices;
 	Vector<GPUMeshMeta>      mesh_metas;
+	Vector<UInt32>           lod_group_heads;   // first mesh id of each LOD group
 	RHI::Buffer*             vertex_buffer = nullptr;
 	RHI::Buffer*             index_buffer = nullptr;
 };

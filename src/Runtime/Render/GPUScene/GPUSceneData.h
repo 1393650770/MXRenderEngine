@@ -95,7 +95,7 @@ struct GPUInstanceData
 	UInt32 batch_id = kInvalidIndex;    // 4
 };
 
-// ---- Per-scene + per-camera uniforms (288 bytes) ---------------------------
+// ---- Per-scene + per-camera uniforms (304 bytes) ---------------------------
 // Mirrors `struct GPUSceneUniformsData` in GPUScene.glsl.
 // PerScene and PerCamera live in one buffer: both update once per view, and the
 // engine has no per-frame descriptor pool yet (stage 4), so fewer buffers is safer.
@@ -108,6 +108,7 @@ struct GPUSceneUniformsData
 	glm::vec4 frustum_planes[6]{};                          // 96   @160
 	glm::vec4 hiz_and_depth{ 0.0f, 0.0f, 0.1f, 100.0f };    // 16   @256  xy = hiz size, z = znear, w = zfar
 	glm::uvec4 counts{ 0u, 0u, 0u, 0u };                    // 16   @272  x = object count, y = frame index, z = culling, w = occlusion
+	glm::vec4 lod_params{ 40.0f, 2.5f, 0.0f, 0.0f };        // 16   @288  x = lodBase, y = lodStep (level k kicks in past base * step^(k-1))
 };
 
 // ---- CPU-side batch descriptor ---------------------------------------------
@@ -132,7 +133,7 @@ struct GPUBatch
 static_assert(sizeof(GPUObjectData) == 96, "GPUObjectData must be 96 bytes (std430)");
 static_assert(sizeof(GPUMaterialData) == 48, "GPUMaterialData must be 48 bytes (std430)");
 static_assert(sizeof(GPUMeshMeta) == 48, "GPUMeshMeta must be 48 bytes (std430)");
-static_assert(sizeof(GPUSceneUniformsData) == 288, "GPUSceneUniformsData must be 288 bytes (std430)");
+static_assert(sizeof(GPUSceneUniformsData) == 304, "GPUSceneUniformsData must be 304 bytes (std430)");
 static_assert(sizeof(GPUInstanceData) == 8, "GPUInstanceData must be 8 bytes (std430)");
 static_assert(sizeof(GPUBatch) == 16, "GPUBatch must be 16 bytes (std430)");
 
