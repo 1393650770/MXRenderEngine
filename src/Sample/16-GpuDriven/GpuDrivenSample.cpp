@@ -78,15 +78,47 @@ public:
 	void OnUpdate(float dt) override final;
 
 protected:
+	// Records the indirect draws for whichever pass is executing.
+	void RecordDraws(RHI::CommandList* in_cmd) const;
+
 	MeshPool  mesh_pool;
 	GPUSceneManager  gpu_scene;
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
+	RHI::Texture* depth_output = nullptr;   // R32F, sampleable copy of the depth buffer
 	UInt32 frame_index = 0;
 	Float32 elapsed = 0.0f;
 	Bool   culling_enabled = true;
+	Bool   occlusion_enabled = false;
 	Bool   has_pruned = false;
 };
+
+// Shared by the depth prepass and the main pass: same geometry, same index
+// chain, so the two paths can never disagree about what is being drawn.
+void GpuDrivenApp::RecordDraws(RHI::CommandList* in_cmd) const
+{
+	const UInt32 stride = static_cast<UInt32>(sizeof(DrawIndexedIndirectArgs));
+	const Vector<GPUBatch>& batches = gpu_scene.GetBatches();
+
+	if (gpu_scene.GetUseFirstInstance())
+	{
+		// shaderDrawParameters is available: gl_InstanceIndex starts at each
+		// command's firstInstance, so the whole scene is ONE indirect command
+		// and there is zero per-draw state.
+		in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), 0,
+			static_cast<UInt32>(batches.size()), stride);
+		return;
+	}
+
+	// Fallback: no firstInstance support, so one command per batch and the
+	// slice offset rides in a push constant.
+	for (UInt32 b = 0; b < batches.size(); ++b)
+	{
+		const UInt32 base = batches[b].base_instance;
+		in_cmd->SetPushConstants(0, sizeof(UInt32), &base);
+		in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), b * stride, 1);
+	}
+}
 
 void GpuDrivenApp::OnInitScene()
 {
@@ -118,6 +150,37 @@ void GpuDrivenApp::OnInitScene()
 	{
 		gpu_scene.SetUseFirstInstance(true);
 		std::cout << "[GpuDriven] firstInstance path: one indirect command for the scene" << std::endl;
+	}
+	if (std::getenv("GPUDRIVEN_OCCLUSION") != nullptr)
+	{
+		occlusion_enabled = true;
+		std::cout << "[GpuDriven] occlusion culling on" << std::endl;
+	}
+
+	// ---- depth output for the occlusion test --------------------------------
+	// The engine's depth attachment is DEPTH_ATTACHMENT-only and the RHI cannot
+	// bind a per-mip view, so the prepass writes depth into this R32F colour
+	// target instead. Cleared to 1.0 (far plane) so untouched pixels read as
+	// "nothing here" and never cause a false occlusion.
+	{
+		ENSURE(GetViewportWidth() > 0 && GetViewportHeight() > 0,
+			"GpuDriven: viewport must be sized before scene init");
+		RHI::TextureDesc d{};
+		d.width = GetViewportWidth();
+		d.height = GetViewportHeight();
+		d.format = ENUM_TEXTURE_FORMAT::R32F;
+		d.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
+		d.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT
+			| ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
+		d.mip_level = 1;
+		d.layer_count = 1;
+		d.samples = 1;
+		d.clear_value.color[0] = 1.0f;
+		d.clear_value.color[1] = 1.0f;
+		d.clear_value.color[2] = 1.0f;
+		d.clear_value.color[3] = 1.0f;
+		depth_output = g_render_rhi->CreateTexture(d);
+		ENSURE(depth_output != nullptr, "GpuDriven: failed to create depth output texture");
 	}
 
 	const glm::vec3 palette[8] = {
@@ -173,7 +236,68 @@ void GpuDrivenApp::OnInitScene()
 	camera.distance = 22.0f;
 	scene_view.SetPerspective(glm::radians(45.0f), 0.1f, 200.0f);
 
-	// ---- 4a. GPU culling pass -------------------------------------------------
+	// ---- 4a. depth prepass -----------------------------------------------------
+	// Publishes a sampleable depth buffer for the occlusion test. The main pass
+	// clears depth again and does its own test, so this changes nothing about
+	// how the scene is drawn — it only makes depth readable.
+	auto* depth_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneDepth", &graph,
+		RHIGetImmediateCommandList(),
+		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+		{
+			if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
+
+			Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
+				"Shader/gpuscene_depth.vert.spv");
+			Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
+				"Shader/gpuscene_depth.frag.spv");
+
+			RenderGraphiPipelineStateDesc pd{};
+			pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+			pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+			pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+			pd.vertex_input_layout = Tool::MeshDataPayload::GetVertexInputLayout();
+			pd.render_targets = { depth_output };
+			pd.depth_stencil_view = GetDepthStencil();
+			pd.raster_state.sample_count = 1;
+			pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
+			pd.depth_stencil_state.depth_test_enable = true;
+			pd.depth_stencil_state.depth_write_enable = true;
+			pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
+			pd.blend_state.render_targets.resize(1);
+			data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+
+			data.pso->CreateShaderResourceBinding(data.srb, false);
+			data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+			data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+			data.srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
+			data.srb->FlushDescriptorWrites();
+
+			delete vs;
+			delete ps;
+		},
+		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+		{
+			if (!depth_output) return;
+
+			// Retained texture, so its layout is managed by hand.
+			in_cmd->TransitionTextureState(depth_output, ENUM_RESOURCE_STATE::RenderTarget);
+
+			Vector<Texture*> rtvs = { depth_output };
+			Vector<ClearValue> clears;
+			clears.push_back(depth_output->GetTextureDesc().clear_value);
+			if (GetDepthStencil()) clears.push_back(GetDepthStencil()->GetTextureDesc().clear_value);
+			in_cmd->SetRenderTarget(rtvs, GetDepthStencil(), clears, GetDepthStencil() != nullptr);
+
+			in_cmd->SetGraphicsPipeline(data.pso);
+			in_cmd->SetShaderResourceBinding(data.srb);
+			in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
+			in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
+			RecordDraws(in_cmd);
+		});
+	depth_pass->SetIsCullable(false);
+	depth_pass->SetShaderPath("Shader/gpuscene_depth");
+
+	// ---- 4b. GPU culling pass -------------------------------------------------
 	// Runs before the draw pass. It writes instanceCount into the very same
 	// buffer the draw pass then consumes as indirect arguments, so the CPU never
 	// learns which objects survived.
@@ -193,6 +317,7 @@ void GpuDrivenApp::OnInitScene()
 			data.srb->SetResource("g_candidates", gpu_scene.GetInstanceBuffer());
 			data.srb->SetResource("g_commands", gpu_scene.GetDrawCommandBuffer());
 			data.srb->SetResource("g_batches", gpu_scene.GetBatchBuffer());
+			if (depth_output) data.srb->SetResource("g_depthTex", depth_output);
 			data.srb->FlushDescriptorWrites();
 
 			delete cs;
@@ -203,6 +328,10 @@ void GpuDrivenApp::OnInitScene()
 			// still in objects[] but never enter the stream.
 			const UInt32 count = gpu_scene.GetActiveObjectCount();
 			if (count == 0) return;
+
+			// The prepass wrote this as a render target; the cull shader samples it.
+			if (depth_output)
+				in_cmd->TransitionTextureState(depth_output, ENUM_RESOURCE_STATE::ShaderResource);
 
 			in_cmd->SetComputePipeline(data.pso);
 			in_cmd->SetShaderResourceBinding(data.srb);
@@ -270,28 +399,7 @@ void GpuDrivenApp::OnInitScene()
 			in_cmd->SetShaderResourceBinding(data.srb);
 			in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
 			in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
-
-			const UInt32 stride = static_cast<UInt32>(sizeof(DrawIndexedIndirectArgs));
-			const Vector<GPUBatch>& batches = gpu_scene.GetBatches();
-
-			if (gpu_scene.GetUseFirstInstance())
-			{
-				// shaderDrawParameters is available: gl_InstanceIndex starts at
-				// each command's firstInstance, so the whole scene is ONE
-				// indirect command and zero per-draw state.
-				in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), 0,
-					static_cast<UInt32>(batches.size()), stride);
-				return;
-			}
-
-			// Fallback: no firstInstance support, so one command per batch and
-			// the slice offset rides in a push constant.
-			for (UInt32 b = 0; b < batches.size(); ++b)
-			{
-				const UInt32 base = batches[b].base_instance;
-				in_cmd->SetPushConstants(0, sizeof(UInt32), &base);
-				in_cmd->DrawIndexedIndirect(gpu_scene.GetDrawCommandBuffer(), b * stride, 1);
-			}
+			RecordDraws(in_cmd);
 		});
 	pass->SetIsCullable(false);
 	pass->SetShaderPath("Shader/gpuscene_object");
@@ -302,6 +410,8 @@ void GpuDrivenApp::OnShutdownScene()
 	// Release before RHIShutdown — member destruction runs too late.
 	gpu_scene.Shutdown();
 	mesh_pool.Release();
+	delete depth_output;
+	depth_output = nullptr;
 }
 
 void GpuDrivenApp::OnUpdate(float dt)
@@ -318,6 +428,10 @@ void GpuDrivenApp::OnUpdate(float dt)
 	u.counts.x = gpu_scene.GetActiveObjectCount();
 	u.counts.y = frame_index++;
 	u.counts.z = culling_enabled ? 1u : 0u;
+	u.counts.w = occlusion_enabled ? 1u : 0u;
+	// xy = depth target size (the cull shader reads it to size its sample grid)
+	u.hiz_and_depth = glm::vec4(static_cast<Float32>(GetViewportWidth()),
+		static_cast<Float32>(GetViewportHeight()), 0.1f, 200.0f);
 	gpu_scene.UploadUniforms();
 
 	// Clear instanceCount so the culling shader can accumulate it again.

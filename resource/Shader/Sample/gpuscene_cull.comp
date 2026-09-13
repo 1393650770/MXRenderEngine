@@ -20,6 +20,11 @@ layout(local_size_x = 64) in;
 
 layout(std430, set = 0, binding = 0) readonly buffer SceneUniforms { GPUSceneUniformsData u; } g_scene;
 
+// Depth published by the depth prepass (R32F colour target, 0..1, near = 0).
+// The engine's depth attachment is not sampleable, so the prepass exists purely
+// to make this readable.
+layout(set = 0, binding = 1) uniform sampler2D g_depthTex;
+
 layout(std430, set = 1, binding = 0) readonly buffer Objects    { GPUObjectData   objects[];    } g_objects;
 layout(std430, set = 1, binding = 2) readonly buffer Meshes     { GPUMeshMeta     meshes[];     } g_meshes;
 layout(std430, set = 1, binding = 3) buffer         VisibleIDs  { uint            ids[];        } g_visible;
@@ -29,6 +34,75 @@ layout(std430, set = 1, binding = 6) readonly buffer Batches    { GPUBatchData  
 
 // Frustum planes arrive in world space (xyz = normal, w = offset).
 // Signed distance > -radius means the bounds sphere is at least partly inside.
+bool FrustumVisible(vec3 center_world, float radius)
+{
+	for (int i = 0; i < 6; ++i)
+	{
+		const vec4 plane = g_scene.u.frustumPlanes[i];
+		if (dot(plane.xyz, center_world) + plane.w < -radius)
+			return false;
+	}
+	return true;
+}
+
+// Occlusion test against the prepass depth.
+//
+// A fixed 4x4 grid is sampled across the sphere's screen-space AABB and the
+// FARTHEST sample decides. Because one unoccluded texel is enough to keep the
+// object, the test can only ever under-cull — it never removes something that
+// is visible. The trade is precision (a coarse grid can miss a thin occluder)
+// for not needing a full depth pyramid, which this RHI cannot express because
+// it has no per-mip texture views.
+bool OcclusionCulled(vec3 center_world, float radius)
+{
+	if (g_scene.u.counts.w == 0u)          // occlusion disabled
+		return false;
+	if (g_scene.u.hizAndDepth.x < 1.0)     // depth target not ready yet
+		return false;
+
+	const vec4 cp = g_scene.u.viewProj * vec4(center_world, 1.0);
+	if (cp.w <= 0.0)                       // behind the camera
+		return false;
+
+	const vec4 cv = g_scene.u.view * vec4(center_world, 1.0);
+	const float view_z = -cv.z;            // the view looks down -Z
+	if (view_z <= radius)                  // sphere straddles the eye
+		return false;
+
+	// Use the NEAR side of the sphere so the AABB is never smaller than the
+	// true footprint — that direction is the conservative one.
+	const float near_z = max(view_z - radius, 1e-3);
+	const float px = abs(g_scene.u.viewProj[0][0]) * radius / near_z;
+	const float py = abs(g_scene.u.viewProj[1][1]) * radius / near_z;
+
+	const vec2 ndc = cp.xy / cp.w;
+	vec2 uv_min = (ndc - vec2(px, py)) * 0.5 + 0.5;
+	vec2 uv_max = (ndc + vec2(px, py)) * 0.5 + 0.5;
+	if (uv_max.x < 0.0 || uv_max.y < 0.0 || uv_min.x > 1.0 || uv_min.y > 1.0)
+		return false;                      // entirely off-screen: let the frustum test handle it
+
+	uv_min = clamp(uv_min, vec2(0.0), vec2(1.0));
+	uv_max = clamp(uv_max, vec2(0.0), vec2(1.0));
+
+	const ivec2 size = textureSize(g_depthTex, 0);
+	const ivec2 max_coord = size - ivec2(1);
+
+	float farthest = 0.0;
+	for (int y = 0; y < 4; ++y)
+	{
+		for (int x = 0; x < 4; ++x)
+		{
+			const vec2 uv = mix(uv_min, uv_max, (vec2(float(x), float(y)) + 0.5) * 0.25);
+			const ivec2 coord = clamp(ivec2(uv * vec2(size)), ivec2(0), max_coord);
+			farthest = max(farthest, texelFetch(g_depthTex, coord, 0).x);
+		}
+	}
+
+	const float sphere_depth = cp.z / cp.w;
+	// Bias so geometry sitting exactly on its own depth is not culled.
+	return sphere_depth > farthest + 1e-4;
+}
+
 bool IsVisible(uint objectID)
 {
 	const GPUObjectData obj = g_objects.objects[objectID];
@@ -37,12 +111,10 @@ bool IsVisible(uint objectID)
 	const float radius = obj.sphereBounds.w;
 	const vec3 center_world = (obj.model * vec4(center_local, 1.0)).xyz;
 
-	for (int i = 0; i < 6; ++i)
-	{
-		const vec4 plane = g_scene.u.frustumPlanes[i];
-		if (dot(plane.xyz, center_world) + plane.w < -radius)
-			return false;
-	}
+	if (!FrustumVisible(center_world, radius))
+		return false;
+	if (OcclusionCulled(center_world, radius))
+		return false;
 	return true;
 }
 
