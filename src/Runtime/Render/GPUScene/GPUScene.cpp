@@ -3,6 +3,7 @@
 #include "RHI/RenderBuffer.h"
 #include "Tool/BufferUtils.h"
 #include <algorithm>
+#include <cstring>
 
 MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Render)
@@ -19,6 +20,9 @@ Bool GPUSceneManager::Initialize(const Config& cfg, const MeshPool& pool)
 	instances_cpu.clear();
 	draw_commands_cpu.clear();
 	batches.clear();
+	slot_generation.clear();
+	free_slots.clear();
+	dirty_slots.clear();
 	objects_cpu.reserve(cfg.max_objects);
 	materials_cpu.reserve(cfg.max_materials);
 
@@ -73,6 +77,9 @@ void GPUSceneManager::Shutdown()
 	instances_cpu.clear();
 	draw_commands_cpu.clear();
 	batches.clear();
+	slot_generation.clear();
+	free_slots.clear();
+	dirty_slots.clear();
 	is_initialized = false;
 }
 
@@ -95,44 +102,126 @@ UInt32 GPUSceneManager::AddMaterial(const GPUMaterialData& material)
 	return static_cast<UInt32>(materials_cpu.size()) - 1u;
 }
 
-UInt32 GPUSceneManager::AddObject(const GPUObjectData& object)
+GPUObjectHandle GPUSceneManager::AddObject(const GPUObjectData& object)
 {
-	ENSURE(objects_cpu.size() < config.max_objects, "GPUScene: object capacity exhausted");
 	ENSURE(object.mesh_id != kInvalidIndex, "GPUScene: object registered without a mesh id");
-	objects_cpu.push_back(object);
-	return static_cast<UInt32>(objects_cpu.size()) - 1u;
+
+	UInt32 slot = kInvalidIndex;
+	if (!free_slots.empty())
+	{
+		// Recycle. The generation was bumped when the slot was released, so it
+		// stays as-is and any handle from the previous tenant is already stale.
+		slot = free_slots.back();
+		free_slots.pop_back();
+	}
+	else
+	{
+		ENSURE(objects_cpu.size() < config.max_objects, "GPUScene: object capacity exhausted");
+		if (objects_cpu.size() >= config.max_objects)
+			return GPUObjectHandle{};
+		slot = static_cast<UInt32>(objects_cpu.size());
+		objects_cpu.push_back(GPUObjectData{});
+		slot_generation.push_back(1u);
+	}
+
+	objects_cpu[slot] = object;
+	objects_cpu[slot].flags &= ~kObjectFlagDeleted;
+	dirty_slots.push_back(slot);
+
+	return GPUObjectHandle{ slot, slot_generation[slot] };
 }
 
-Bool GPUSceneManager::RemoveObject(UInt32 object_id)
+Bool GPUSceneManager::RemoveObject(GPUObjectHandle handle)
 {
-	if (object_id >= objects_cpu.size()) return false;
-	if (objects_cpu[object_id].flags & kObjectFlagDeleted) return false;   // already gone
-	objects_cpu[object_id].flags |= kObjectFlagDeleted;
+	if (!IsObjectAlive(handle)) return false;
+
+	const UInt32 slot = handle.index;
+	objects_cpu[slot].flags |= kObjectFlagDeleted;
+
+	// Bump the generation so every other handle to this slot goes stale, then
+	// return the slot to the free list. The object keeps its slot until the next
+	// AddObject takes it — BuildBatches is what actually stops drawing it.
+	UInt32 gen = (slot_generation[slot] + 1u) & kObjectGenerationMask;
+	if (gen == 0u) gen = 1u;      // 0 is reserved, so a fresh slot is never gen 0
+	slot_generation[slot] = gen;
+
+	free_slots.push_back(slot);
 	return true;
 }
 
-Bool GPUSceneManager::IsObjectDeleted(UInt32 object_id) const
+Bool GPUSceneManager::IsObjectAlive(GPUObjectHandle handle) const
 {
-	if (object_id >= objects_cpu.size()) return false;
-	return (objects_cpu[object_id].flags & kObjectFlagDeleted) != 0u;
-}
-void GPUSceneManager::SetObjectModel(UInt32 object_id, const glm::mat4& model)
-{
-	ENSURE(object_id < objects_cpu.size(), "GPUScene: SetObjectModel out of range");
-	objects_cpu[object_id].model = model;
+	if (!handle.IsValid()) return false;
+	if (handle.index >= objects_cpu.size()) return false;
+	if (slot_generation[handle.index] != handle.generation) return false;   // stale handle
+	return (objects_cpu[handle.index].flags & kObjectFlagDeleted) == 0u;
 }
 
-void GPUSceneManager::SetObjectBounds(UInt32 object_id, const glm::vec4& sphere_bounds)
+const GPUObjectData* GPUSceneManager::GetObjectByHandle(GPUObjectHandle handle) const
 {
-	ENSURE(object_id < objects_cpu.size(), "GPUScene: SetObjectBounds out of range");
-	objects_cpu[object_id].sphere_bounds = sphere_bounds;
+	return IsObjectAlive(handle) ? &objects_cpu[handle.index] : nullptr;
+}
+
+void GPUSceneManager::MarkObjectDirty(UInt32 slot)
+{
+	if (slot < objects_cpu.size())
+		dirty_slots.push_back(slot);
+}
+
+void GPUSceneManager::SetObjectModel(UInt32 slot, const glm::mat4& model)
+{
+	ENSURE(slot < objects_cpu.size(), "GPUScene: SetObjectModel out of range");
+	if (slot >= objects_cpu.size()) return;
+	objects_cpu[slot].model = model;
+	MarkObjectDirty(slot);
+}
+
+void GPUSceneManager::SetObjectBounds(UInt32 slot, const glm::vec4& sphere_bounds)
+{
+	ENSURE(slot < objects_cpu.size(), "GPUScene: SetObjectBounds out of range");
+	if (slot >= objects_cpu.size()) return;
+	objects_cpu[slot].sphere_bounds = sphere_bounds;
+	MarkObjectDirty(slot);
 }
 
 void GPUSceneManager::UploadObjects()
 {
 	if (!object_buffer || objects_cpu.empty()) return;
-	const UInt32 bytes = static_cast<UInt32>(objects_cpu.size() * sizeof(GPUObjectData));
-	Tool::BufferUtils::Upload(object_buffer, objects_cpu.data(), bytes);
+
+	// Fast path: nothing tracked as changed but the caller asked for an upload
+	// (e.g. the very first one after registration) — fall back to a full sweep.
+	if (dirty_slots.empty())
+	{
+		const UInt32 bytes = static_cast<UInt32>(objects_cpu.size() * sizeof(GPUObjectData));
+		Tool::BufferUtils::Upload(object_buffer, objects_cpu.data(), bytes);
+		return;
+	}
+
+	// Otherwise upload only the slots that moved. If most of the scene is dirty
+	// the scattered writes cost more than one contiguous copy, so switch back.
+	const UInt32 slot_size = static_cast<UInt32>(sizeof(GPUObjectData));
+	if (dirty_slots.size() * 4u >= objects_cpu.size())
+	{
+		const UInt32 bytes = static_cast<UInt32>(objects_cpu.size() * sizeof(GPUObjectData));
+		Tool::BufferUtils::Upload(object_buffer, objects_cpu.data(), bytes);
+		dirty_slots.clear();
+		return;
+	}
+
+	// One map for all the scattered ranges: mapping per slot would pay the
+	// vkMapMemory/vkUnmapMemory round trip once per object.
+	void* mapped = g_render_rhi->MapBuffer(object_buffer, ENUM_MAP_TYPE::Write, ENUM_MAP_FLAG::None);
+	if (mapped)
+	{
+		for (UInt32 slot : dirty_slots)
+		{
+			if (slot >= objects_cpu.size()) continue;
+			std::memcpy(static_cast<UInt8*>(mapped) + slot * slot_size,
+				&objects_cpu[slot], slot_size);
+		}
+		g_render_rhi->UnmapBuffer(object_buffer);
+	}
+	dirty_slots.clear();
 }
 
 void GPUSceneManager::UploadMaterials()

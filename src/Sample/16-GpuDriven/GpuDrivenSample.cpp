@@ -83,6 +83,7 @@ protected:
 
 	MeshPool  mesh_pool;
 	GPUSceneManager  gpu_scene;
+	Vector<GPUObjectHandle> object_handles;   // stable across slot recycling
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
 	RHI::Texture* depth_output = nullptr;   // R32F, sampleable copy of the depth buffer
@@ -216,7 +217,7 @@ void GpuDrivenApp::OnInitScene()
 				obj.mesh_id = static_cast<UInt32>((x + y + z) % 2);
 				obj.material_id = static_cast<UInt32>((x + y + z) % 8);
 				obj.sphere_bounds = mesh_pool.GetMeshMetas()[obj.mesh_id].bounds;
-				gpu_scene.AddObject(obj);
+				object_handles.push_back(gpu_scene.AddObject(obj));
 			}
 
 	gpu_scene.BuildBatches(mesh_pool);
@@ -442,27 +443,50 @@ void GpuDrivenApp::OnUpdate(float dt)
 	// Geometry fields (indexCount/firstIndex) are untouched by this.
 	gpu_scene.ResetDrawCommands();
 
-	// Stage 4: remove a slice of the scene at runtime. Ids stay valid (soft
-	// delete); rebuilding the batches is all that is needed to apply it.
+	// Stage 4: remove a slice of the scene at runtime, then immediately refill
+	// the freed slots — this is what exercises recycling.
 	if (!has_pruned && elapsed > 3.0f)
 	{
 		has_pruned = true;
 		UInt32 removed = 0;
-		for (UInt32 i = 0; i < gpu_scene.GetObjectCount(); ++i)
+		for (GPUObjectHandle handle : object_handles)
 		{
-			if (gpu_scene.GetObject(i).material_id == 0u)
+			const GPUObjectData* obj = gpu_scene.GetObjectByHandle(handle);
+			if (obj && obj->material_id == 0u)
 			{
-				gpu_scene.RemoveObject(i);
+				gpu_scene.RemoveObject(handle);
 				++removed;
 			}
 		}
+
+		// Recycle half the freed slots with fresh objects: the slot count must
+		// NOT grow if the free list is working.
+		const UInt32 slots_before = gpu_scene.GetSlotCount();
+		const UInt32 refill = removed / 2u;
+		for (UInt32 i = 0; i < refill; ++i)
+		{
+			GPUObjectData fresh{};
+			fresh.mesh_id = static_cast<UInt32>(i % 2u);
+			fresh.material_id = 7u;                       // the near-white material
+			fresh.model = glm::translate(glm::mat4(1.0f), glm::vec3(
+				(static_cast<Float32>(i % 8) - 3.5f) * 1.7f,
+				6.0f,
+				(static_cast<Float32>(i / 8) - 3.5f) * 1.7f))
+				* glm::scale(glm::mat4(1.0f), glm::vec3(0.45f));
+			fresh.sphere_bounds = mesh_pool.GetMeshMetas()[fresh.mesh_id].bounds;
+			object_handles.push_back(gpu_scene.AddObject(fresh));
+		}
+
 		gpu_scene.BuildBatches(mesh_pool);
 		gpu_scene.BuildDrawCommands(mesh_pool);
 		gpu_scene.UploadVisibleIDs();
 		gpu_scene.UploadInstances();
 		gpu_scene.UploadBatches();
-		std::cout << "[GpuDriven] pruned " << removed
-			<< " objects -> active=" << gpu_scene.GetActiveObjectCount()
+		gpu_scene.UploadObjects();
+		std::cout << "[GpuDriven] pruned " << removed << ", refilled " << refill
+			<< " -> active=" << gpu_scene.GetActiveObjectCount()
+			<< " slots=" << slots_before << "->" << gpu_scene.GetSlotCount()
+			<< " free=" << gpu_scene.GetFreeSlotCount()
 			<< " batches=" << gpu_scene.GetBatchCount() << std::endl;
 	}
 
@@ -472,15 +496,17 @@ void GpuDrivenApp::OnUpdate(float dt)
 		draw_distance = glm::max(34.0f, draw_distance - dt * 15.0f);
 
 	// Slow spin. Only the 96-byte object record is rewritten — no descriptor
-	// touch, which is the entire point.
-	for (UInt32 i = 0; i < gpu_scene.GetObjectCount(); ++i)
+	// touch, which is the entire point. Iterating handles rather than slots
+	// keeps this correct after slots start being recycled.
+	for (GPUObjectHandle handle : object_handles)
 	{
-		if (gpu_scene.IsObjectDeleted(i)) continue;
-		GPUObjectData& obj = gpu_scene.GetObject(i);
+		if (!gpu_scene.IsObjectAlive(handle)) continue;
+		GPUObjectData& obj = gpu_scene.GetObject(handle.index);
 		const glm::vec3 pos = glm::vec3(obj.model[3]);
 		obj.model = glm::translate(glm::mat4(1.0f), pos)
-			* glm::rotate(glm::mat4(1.0f), elapsed * 0.35f + i * 0.01f, glm::vec3(0.0f, 1.0f, 0.0f))
+			* glm::rotate(glm::mat4(1.0f), elapsed * 0.35f + handle.index * 0.01f, glm::vec3(0.0f, 1.0f, 0.0f))
 			* glm::scale(glm::mat4(1.0f), glm::vec3(0.45f));
+		gpu_scene.MarkObjectDirty(handle.index);
 	}
 	gpu_scene.UploadObjects();
 }
@@ -610,30 +636,58 @@ static Int RunSelfTest()
 	Check(vis2.size() == 3, "sorted batch keeps every instance");
 	Check(vis2[0] == 1u && vis2[1] == 2u && vis2[2] == 0u, "instances sorted by material id");
 
-	// --- stage 4: soft delete at runtime ---
+	// --- stage 4: soft delete + slot recycling ---
 	MeshPool pool3;
 	pool3.AddMesh(MakeTrianglePayload());
 	GPUSceneManager scene3;
+	Vector<GPUObjectHandle> handles3;
 	for (UInt32 i = 0; i < 3; ++i)
 	{
 		GPUObjectData obj{};
 		obj.mesh_id = 0;
 		obj.material_id = i;
-		scene3.AddObject(obj);
+		handles3.push_back(scene3.AddObject(obj));
 	}
 	scene3.BuildBatches(pool3);
 	Check(scene3.GetActiveObjectCount() == 3, "3 active before removal");
-	Check(scene3.RemoveObject(1u), "RemoveObject reports success");
-	Check(scene3.IsObjectDeleted(1u), "removed object is flagged deleted");
-	Check(!scene3.RemoveObject(1u), "removing twice is rejected");
+	Check(scene3.IsObjectAlive(handles3[1]), "handle is alive before removal");
+	Check(scene3.RemoveObject(handles3[1]), "RemoveObject reports success");
+	Check(!scene3.IsObjectAlive(handles3[1]), "removed handle is dead");
+	Check(!scene3.RemoveObject(handles3[1]), "removing twice is rejected");
+	Check(scene3.GetObjectByHandle(handles3[1]) == nullptr, "dead handle yields no object");
+
 	scene3.BuildBatches(pool3);
 	Check(scene3.GetActiveObjectCount() == 2, "2 active after removal");
-
 	const Vector<UInt32>& vis3 = scene3.GetVisibleIDs();
 	Check(vis3.size() == 2, "visibleIDs shrank to 2");
 	Bool removed_gone = true;
-	for (UInt32 v : vis3) if (v == 1u) removed_gone = false;
+	for (UInt32 v : vis3) if (v == handles3[1].index) removed_gone = false;
 	Check(removed_gone, "removed object is absent from visibleIDs");
+	Check(scene3.GetFreeSlotCount() == 1, "one slot is on the free list");
+
+	// Recycling: the freed slot must be handed back out, not grown past.
+	const UInt32 slots_before = scene3.GetSlotCount();
+	GPUObjectData refill{};
+	refill.mesh_id = 0;
+	refill.material_id = 9;
+	const GPUObjectHandle reused = scene3.AddObject(refill);
+	Check(scene3.GetSlotCount() == slots_before, "recycled a freed slot instead of growing");
+	Check(reused.index == handles3[1].index, "LIFO free list returns the most recently freed slot");
+	Check(reused.generation != handles3[1].generation, "generation was bumped on recycle");
+	Check(!scene3.IsObjectAlive(handles3[1]), "old handle stays dead once the slot is reused");
+	Check(scene3.IsObjectAlive(reused), "the new handle is alive");
+	Check(scene3.GetFreeSlotCount() == 0, "free list drained");
+
+	scene3.BuildBatches(pool3);
+	Check(scene3.GetActiveObjectCount() == 3, "3 active again after refill");
+
+	// Churn: recycling must not consume slots no matter how many cycles run.
+	for (UInt32 cycle = 0; cycle < 100; ++cycle)
+	{
+		const GPUObjectHandle h = scene3.AddObject(refill);
+		scene3.RemoveObject(h);
+	}
+	Check(scene3.GetSlotCount() == slots_before + 1, "100 add/remove cycles consumed no new slots");
 
 	// --- indirect args ---
 	scene.BuildDrawCommands(pool);

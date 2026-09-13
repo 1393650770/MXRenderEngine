@@ -17,6 +17,19 @@ MYRENDERER_BEGIN_NAMESPACE(MXRender)
 MYRENDERER_BEGIN_NAMESPACE(Render)
 MYRENDERER_BEGIN_NAMESPACE(GPUScene)
 
+// A stable reference to an object slot.
+//
+// Index alone is not enough once slots are recycled: the object that used to
+// live at index 7 is gone the moment a new object takes slot 7. The generation
+// is bumped on every release, so a stale handle fails IsValid() instead of
+// silently addressing a different object.
+struct GPUObjectHandle
+{
+	UInt32 index = kInvalidIndex;
+	UInt32 generation = 0;
+	Bool IsValid() const { return index != kInvalidIndex; }
+};
+
 // Owns every retained buffer that makes up the GPU Scene, plus the CPU-side
 // mirror of each one.
 //
@@ -52,18 +65,31 @@ public:
 
 	// ---- registration ----
 	UInt32 AddMaterial(const GPUMaterialData& material);
-	UInt32 AddObject(const GPUObjectData& object);
 
-	// Soft delete: the id stays valid and the object stops being batched.
-	// Call BuildBatches afterwards to apply it.
-	Bool RemoveObject(UInt32 object_id);
-	Bool IsObjectDeleted(UInt32 object_id) const;
+	// Allocates a slot, recycling a freed one when available. The scene can
+	// therefore be cycled indefinitely as long as the live count stays under
+	// max_objects — this is the difference between "the array has capacity" and
+	// "the scene can churn".
+	GPUObjectHandle AddObject(const GPUObjectData& object);
+
+	// Releases the slot back to the free list and bumps its generation, so any
+	// other handle to the same object becomes invalid. Call BuildBatches
+	// afterwards to apply it.
+	Bool RemoveObject(GPUObjectHandle handle);
+	Bool IsObjectAlive(GPUObjectHandle handle) const;
 
 	// ---- CPU-side mutation ----
-	GPUObjectData&       GetObject(UInt32 object_id)       { return objects_cpu[object_id]; }
-	const GPUObjectData& GetObject(UInt32 object_id) const { return objects_cpu[object_id]; }
-	void SetObjectModel(UInt32 object_id, const glm::mat4& model);
-	void SetObjectBounds(UInt32 object_id, const glm::vec4& sphere_bounds);
+	// Index-based accessors. The index is the raw slot; use a handle when the
+	// slot may be recycled underneath you.
+	GPUObjectData&       GetObject(UInt32 slot)       { return objects_cpu[slot]; }
+	const GPUObjectData& GetObject(UInt32 slot) const { return objects_cpu[slot]; }
+	const GPUObjectData* GetObjectByHandle(GPUObjectHandle handle) const;
+
+	// Marks the slot for upload. Cheap, and UploadObjects only walks what
+	// actually changed.
+	void MarkObjectDirty(UInt32 slot);
+	void SetObjectModel(UInt32 slot, const glm::mat4& model);
+	void SetObjectBounds(UInt32 slot, const glm::vec4& sphere_bounds);
 
 	// ---- upload (buffer writes, never descriptor updates) ----
 	void UploadObjects();
@@ -119,6 +145,9 @@ public:
 	// Objects actually submitted for drawing — the number the culling dispatch
 	// must cover, since it indexes the instance stream rather than objects[].
 	UInt32 GetActiveObjectCount() const { return static_cast<UInt32>(instances_cpu.size()); }
+	// Slots ever allocated (live + holes). Slots beyond this are untouched.
+	UInt32 GetSlotCount() const { return static_cast<UInt32>(objects_cpu.size()); }
+	UInt32 GetFreeSlotCount() const { return static_cast<UInt32>(free_slots.size()); }
 	UInt32 GetMaterialCount() const { return static_cast<UInt32>(materials_cpu.size()); }
 
 private:
@@ -135,6 +164,13 @@ private:
 	Vector<DrawIndexedIndirectArgs>   draw_commands_cpu;
 	Vector<GPUBatch>                  batches;
 	GPUSceneUniformsData              uniforms_cpu{};
+
+	// Slot bookkeeping. slot_generation[i] is bumped every time slot i is
+	// released; free_slots is the recycle stack (LIFO keeps recently freed slots
+	// hot in cache, and makes the self-test deterministic).
+	Vector<UInt32> slot_generation;
+	Vector<UInt32> free_slots;
+	Vector<UInt32> dirty_slots;
 
 	// GPU buffers (retained; bound once at init)
 	RHI::Buffer* object_buffer   = nullptr;

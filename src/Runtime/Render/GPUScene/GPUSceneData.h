@@ -77,11 +77,12 @@ struct GPUMeshMeta
 };
 
 // ---- Object flags -----------------------------------------------------------
-// Removal is a soft delete: the slot keeps its id (so external references stay
-// valid) and is simply skipped when batches are rebuilt. Actually reclaiming
-// the slot needs a free list plus generation handles — not worth it until
-// scenes churn hard enough to hit kMaxObjects.
+// A slot is only ever recycled through GPUObjectHandle (below), never by index
+// alone: the generation is what makes a stale reference detectable instead of
+// silently pointing at whatever object took the slot next.
 constexpr UInt32 kObjectFlagDeleted = 1u << 0;
+constexpr UInt32 kObjectGenerationBits = 16;
+constexpr UInt32 kObjectGenerationMask = (1u << kObjectGenerationBits) - 1u;
 
 // ---- The culling shader's input stream (8 bytes) ---------------------------
 // Mirrors `struct GPUInstanceData` in GPUScene.glsl.
