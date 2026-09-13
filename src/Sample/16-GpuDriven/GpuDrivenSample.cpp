@@ -40,11 +40,19 @@ using namespace MXRender::Render::GPUScene;
 // levels covers a 16:1 footprint range — enough that an object's screen extent
 // maps to roughly one texel at some level.
 static constexpr UInt32 kHizLevels = 5;
+// Two pyramids, alternating per frame. Frame N culls against frame N-1's depth,
+// which is what lets the depth prepass go away: the main pass publishes depth
+// as a second render target instead of a separate geometry pass producing it.
+static constexpr UInt32 kHizBuffers = 2;
 
 struct GpuDrivenPassData : public RenderGraphPassDataBase
 {
 	RenderPipelineState*  pso = nullptr;
 	ShaderResourceBinding* srb = nullptr;
+	// Double-buffered draw passes need one pipeline per Hi-Z buffer: the render
+	// pass is baked into the pipeline (the PSO cache keys on it), so a per-frame
+	// render target means a pipeline per target.
+	RenderPipelineState*  pso_by_parity[2] = { nullptr, nullptr };
 	// Extra SRBs for passes that need more than one binding set (the Hi-Z build
 	// binds a different source/destination pair per level).
 	Vector<ShaderResourceBinding*> extra_srbs;
@@ -53,6 +61,7 @@ struct GpuDrivenPassData : public RenderGraphPassDataBase
 	{
 		delete srb;
 		srb = nullptr;
+		// pso_by_parity entries are owned by the RHI's pipeline cache.
 		for (ShaderResourceBinding* s : extra_srbs) delete s;
 		extra_srbs.clear();
 	}
@@ -123,9 +132,10 @@ protected:
 	Vector<GPUObjectHandle> object_handles;   // stable across slot recycling
 	Vector<UInt32> group_heads;               // usable LOD-group LOD0 ids
 	Bool use_meshlet = false;
+	UInt32 hiz_parity = 0;   // which Hi-Z buffer the next draw writes
 	Render::SceneView scene_view;
 	Application::OrbitCameraController camera;
-	RHI::Texture* hiz_textures[kHizLevels] = {};   // Hi-Z pyramid, level k is half of k-1
+	RHI::Texture* hiz_textures[kHizBuffers][kHizLevels] = {};   // [buffer][level]
 	UInt32 frame_index = 0;
 	Float32 elapsed = 0.0f;
 	Bool   culling_enabled = true;
@@ -221,15 +231,19 @@ void GpuDrivenApp::OnInitScene()
 		}
 	}
 
-	// ---- Hi-Z pyramid ---------------------------------------------------------
-	// Level 0 is written by the depth prepass as a colour target; the coarser
-	// levels are produced by gpuscene_hiz.comp. They are separate textures rather
-	// than one mip chain because this RHI cannot bind a per-mip view, and they
-	// are separate bindings rather than a sampler array because SetResource binds
-	// by instance name and does not address array elements.
+	// ---- Hi-Z pyramid (double buffered) ---------------------------------------
+	// Level 0 is published by the main pass as a second colour target; the coarser
+	// levels are produced by gpuscene_hiz.comp. Two pyramids alternate so frame N
+	// culls against frame N-1's depth without either one being written and read in
+	// the same frame.
 	//
-	// Cleared to 1.0 (far plane) so untouched pixels read as "nothing here" and
-	// can never cause a false occlusion.
+	// Levels are separate textures rather than one mip chain because this RHI
+	// cannot bind a per-mip view, and separate bindings rather than a sampler
+	// array because SetResource binds by instance name.
+	//
+	// Cleared to 1.0 (far plane) so an uninitialised pyramid reads as "nothing
+	// here" — on the very first frames, before any depth has been published, that
+	// means nothing is falsely occluded.
 	{
 		ENSURE(GetViewportWidth() > 0 && GetViewportHeight() > 0,
 			"GpuDriven: viewport must be sized before scene init");
@@ -237,27 +251,31 @@ void GpuDrivenApp::OnInitScene()
 		const UInt32 view_w = GetViewportWidth();
 		const UInt32 view_h = GetViewportHeight();
 
-		for (UInt32 k = 0; k < kHizLevels; ++k)
+		for (UInt32 b = 0; b < kHizBuffers; ++b)
 		{
-			RHI::TextureDesc d{};
-			d.width = (view_w >> k) > 0u ? (view_w >> k) : 1u;
-			d.height = (view_h >> k) > 0u ? (view_h >> k) : 1u;
-			d.format = ENUM_TEXTURE_FORMAT::R32F;
-			d.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
-			d.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
-			// Level 0 is rendered into; the rest are compute targets.
-			d.usage |= (k == 0u)
-				? ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT
-				: ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_STORAGE;
-			d.mip_level = 1;
-			d.layer_count = 1;
-			d.samples = 1;
-			d.clear_value.color[0] = 1.0f;
-			d.clear_value.color[1] = 1.0f;
-			d.clear_value.color[2] = 1.0f;
-			d.clear_value.color[3] = 1.0f;
-			hiz_textures[k] = g_render_rhi->CreateTexture(d);
-			ENSURE(hiz_textures[k] != nullptr, "GpuDriven: failed to create a Hi-Z level");
+			for (UInt32 k = 0; k < kHizLevels; ++k)
+			{
+				RHI::TextureDesc d{};
+				d.width = (view_w >> k) > 0u ? (view_w >> k) : 1u;
+				d.height = (view_h >> k) > 0u ? (view_h >> k) : 1u;
+				d.format = ENUM_TEXTURE_FORMAT::R32F;
+				d.type = ENUM_TEXTURE_TYPE::ENUM_TYPE_2D;
+				d.usage = ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_SHADERRESOURCE;
+				// Level 0 is rendered into by the main pass; the rest are compute
+				// targets. Every level is also sampled by the culler.
+				d.usage |= (k == 0u)
+					? ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_COLOR_ATTACHMENT
+					: ENUM_TEXTURE_USAGE_TYPE::ENUM_TYPE_STORAGE;
+				d.mip_level = 1;
+				d.layer_count = 1;
+				d.samples = 1;
+				d.clear_value.color[0] = 1.0f;
+				d.clear_value.color[1] = 1.0f;
+				d.clear_value.color[2] = 1.0f;
+				d.clear_value.color[3] = 1.0f;
+				hiz_textures[b][k] = g_render_rhi->CreateTexture(d);
+				ENSURE(hiz_textures[b][k] != nullptr, "GpuDriven: failed to create a Hi-Z level");
+			}
 		}
 	}
 
@@ -329,251 +347,176 @@ void GpuDrivenApp::OnInitScene()
 	camera.distance = 22.0f;
 	scene_view.SetPerspective(glm::radians(45.0f), 0.1f, 200.0f);
 
-	// ---- 4a. depth prepass -----------------------------------------------------
-	// Publishes a sampleable depth buffer for the occlusion test. The main pass
-	// clears depth again and does its own test, so this changes nothing about
-	// how the scene is drawn — it only makes depth readable.
-	auto* depth_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneDepth", &graph,
-		RHIGetImmediateCommandList(),
-		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+	// ---- pass chain -----------------------------------------------------------
+	// Temporal occlusion: frame N culls against frame N-1's pyramid, which is what
+	// lets the depth prepass disappear. The main pass publishes depth as a second
+	// render target on its way past, so the scene is rasterised ONCE instead of
+	// twice. The cost is one frame of lag in the occlusion test, which surfaces as
+	// occasional over-draw rather than any visual error — the MAX reduction can
+	// only under-cull.
+	//
+	// Order is therefore: cull (previous frame's pyramid) -> draw (writes this
+	// frame's level 0) -> build the rest of this frame's pyramid.
+	// Parity lives in a member and is re-read inside each execute lambda — a
+	// captured value would freeze on the init-time parity and quietly turn the
+	// double buffering into single buffering.
+
+	// One helper so the cull/draw passes do not each repeat the target setup.
+	auto bind_hiz_target = [this](CommandList* in_cmd)
+	{
+		const UInt32 cur_buffer = hiz_parity;
+		if (!hiz_textures[cur_buffer][0]) return;
+
+		in_cmd->TransitionTextureState(hiz_textures[cur_buffer][0], ENUM_RESOURCE_STATE::RenderTarget);
+
+		Vector<Texture*> rtvs = { GetBackBuffer(), hiz_textures[cur_buffer][0] };
+		Vector<ClearValue> clears;
+		clears.push_back(GetBackBuffer()->GetTextureDesc().clear_value);
+		clears.push_back(hiz_textures[cur_buffer][0]->GetTextureDesc().clear_value);   // 1.0 = far
+		if (GetDepthStencil()) clears.push_back(GetDepthStencil()->GetTextureDesc().clear_value);
+		in_cmd->SetRenderTarget(rtvs, GetDepthStencil(), clears, GetDepthStencil() != nullptr);
+	};
+
+	// Binds a pyramid's five levels to a cull shader's SRB. `buffer` selects which
+	// of the two pyramids — that is the whole point of double buffering here:
+	// culling reads the one the previous frame finished writing.
+	auto bind_hiz_levels = [this](ShaderResourceBinding* srb, UInt32 buffer)
+	{
+		for (UInt32 k = 0; k < kHizLevels; ++k)
 		{
-			if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
-
-			Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
-				"Shader/gpuscene_depth.vert.spv");
-			Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
-				"Shader/gpuscene_depth.frag.spv");
-
-			RenderGraphiPipelineStateDesc pd{};
-			pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
-			pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
-			pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
-			pd.vertex_input_layout = Tool::MeshDataPayload::GetVertexInputLayout();
-			pd.render_targets = { hiz_textures[0] };
-			pd.depth_stencil_view = GetDepthStencil();
-			pd.raster_state.sample_count = 1;
-			pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
-			pd.depth_stencil_state.depth_test_enable = true;
-			pd.depth_stencil_state.depth_write_enable = true;
-			pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
-			pd.blend_state.render_targets.resize(1);
-			data.pso = g_render_rhi->CreateRenderPipelineState(pd);
-
-			data.pso->CreateShaderResourceBinding(data.srb, false);
-			data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
-			data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
-			data.srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
-			data.srb->FlushDescriptorWrites();
-
-			delete vs;
-			delete ps;
-		},
-		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
-		{
-			if (!hiz_textures[0]) return;
-
-			// Retained texture, so its layout is managed by hand.
-			in_cmd->TransitionTextureState(hiz_textures[0], ENUM_RESOURCE_STATE::RenderTarget);
-
-			Vector<Texture*> rtvs = { hiz_textures[0] };
-			Vector<ClearValue> clears;
-			clears.push_back(hiz_textures[0]->GetTextureDesc().clear_value);
-			if (GetDepthStencil()) clears.push_back(GetDepthStencil()->GetTextureDesc().clear_value);
-			in_cmd->SetRenderTarget(rtvs, GetDepthStencil(), clears, GetDepthStencil() != nullptr);
-
-			in_cmd->SetGraphicsPipeline(data.pso);
-			in_cmd->SetShaderResourceBinding(data.srb);
-			in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
-			in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
-			RecordDraws(in_cmd);
-		});
-	depth_pass->SetIsCullable(false);
-	depth_pass->SetShaderPath("Shader/gpuscene_depth");
-
-	// ---- 4b. Hi-Z pyramid build -------------------------------------------------
-	// One dispatch per level. Each level depends on the finished result of the
-	// one below it, which is why this is a loop of dispatches with a barrier
-	// between them rather than a single dispatch walking all levels.
-	auto* hiz_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneHiz", &graph,
-		RHIGetImmediateCommandList(),
-		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
-		{
-			Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
-				"Shader/gpuscene_hiz.comp.spv");
-			data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
-
-			// One SRB per level pair: same binding names, different textures.
-			for (UInt32 k = 0; k + 1u < kHizLevels; ++k)
+			if (!hiz_textures[buffer][k]) continue;
+			switch (k)
 			{
-				ShaderResourceBinding* srb = nullptr;
-				data.pso->CreateShaderResourceBinding(srb, false);
-				srb->SetResource("g_src", hiz_textures[k]);
-				srb->SetResource("g_dst", hiz_textures[k + 1u]);
-				srb->FlushDescriptorWrites();
-				data.extra_srbs.push_back(srb);
+			case 0: srb->SetResource("g_hiz0", hiz_textures[buffer][0]); break;
+			case 1: srb->SetResource("g_hiz1", hiz_textures[buffer][1]); break;
+			case 2: srb->SetResource("g_hiz2", hiz_textures[buffer][2]); break;
+			case 3: srb->SetResource("g_hiz3", hiz_textures[buffer][3]); break;
+			default: srb->SetResource("g_hiz4", hiz_textures[buffer][4]); break;
 			}
-			delete cs;
-		},
-		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
-		{
-			if (!hiz_textures[0]) return;
+		}
+	};
 
-			// Level 0 was left as a render target by the prepass.
-			in_cmd->TransitionTextureState(hiz_textures[0], ENUM_RESOURCE_STATE::ShaderResource);
-
-			const UInt32 view_w = GetViewportWidth();
-			const UInt32 view_h = GetViewportHeight();
-
-			for (UInt32 k = 0; k + 1u < kHizLevels && k < data.extra_srbs.size(); ++k)
-			{
-				const UInt32 sw = (view_w >> k) > 0u ? (view_w >> k) : 1u;
-				const UInt32 sh = (view_h >> k) > 0u ? (view_h >> k) : 1u;
-
-				in_cmd->SetComputePipeline(data.pso);
-				in_cmd->SetShaderResourceBinding(data.extra_srbs[k]);
-				in_cmd->Dispatch((sw + 7u) / 8u, (sh + 7u) / 8u, 1);
-
-				// The level just written is read as a shader resource by the next
-				// dispatch and by the culling pass. Retained texture, so this
-				// barrier is manual — the RDG only covers transients.
-				in_cmd->TransitionTextureState(hiz_textures[k + 1u],
-					ENUM_RESOURCE_STATE::ShaderResource);
-			}
-		});
-	hiz_pass->SetIsCullable(false);
-	hiz_pass->SetShaderPath("Shader/gpuscene_hiz");
-
-	// ---- 4c. GPU culling pass -------------------------------------------------
-	// Runs before the draw pass. It writes instanceCount into the very same
-	// buffer the draw pass then consumes as indirect arguments, so the CPU never
-	// learns which objects survived.
-	auto* cull_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneCull", &graph,
-		RHIGetImmediateCommandList(),
-		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
-		{
-			Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
-				"Shader/gpuscene_cull.comp.spv");
-			data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
-
-			data.pso->CreateShaderResourceBinding(data.srb, false);
-			data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
-			data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
-			data.srb->SetResource("g_meshes", gpu_scene.GetMeshBuffer());
-			data.srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
-			data.srb->SetResource("g_candidates", gpu_scene.GetInstanceBuffer());
-			data.srb->SetResource("g_commands", gpu_scene.GetDrawCommandBuffer());
-			data.srb->SetResource("g_batches", gpu_scene.GetBatchBuffer());
-			for (UInt32 k = 0; k < kHizLevels; ++k)
-			{
-				if (!hiz_textures[k]) continue;
-				// SetResource binds by GLSL instance name, and the shader declares
-				// the levels as five distinct samplers (not an array) precisely
-				// so they can be bound this way.
-				switch (k)
-				{
-				case 0: data.srb->SetResource("g_hiz0", hiz_textures[0]); break;
-				case 1: data.srb->SetResource("g_hiz1", hiz_textures[1]); break;
-				case 2: data.srb->SetResource("g_hiz2", hiz_textures[2]); break;
-				case 3: data.srb->SetResource("g_hiz3", hiz_textures[3]); break;
-				default: data.srb->SetResource("g_hiz4", hiz_textures[4]); break;
-				}
-			}
-			data.srb->FlushDescriptorWrites();
-
-			delete cs;
-		},
-		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
-		{
-			// Must cover the instance stream, not objects[]: deleted objects are
-			// still in objects[] but never enter the stream.
-			const UInt32 count = gpu_scene.GetActiveObjectCount();
-			if (count == 0) return;
-
-			// The Hi-Z pass already left every level in the shader-resource state.
-			in_cmd->SetComputePipeline(data.pso);
-			in_cmd->SetShaderResourceBinding(data.srb);
-			in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
-
-			// The draw args and the visible list were just written by a shader.
-			// Both buffers are retained, so the RDG's automatic pass-boundary
-			// barriers do not cover them — they need explicit ones here.
-			in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
-				ENUM_RESOURCE_STATE::IndirectArgument);
-			in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
-				ENUM_RESOURCE_STATE::ShaderResource);
-		});
-	cull_pass->SetIsCullable(false);
-	cull_pass->SetShaderPath("Shader/gpuscene_cull");
-
-	// ---- 4d. object draw pass ---------------------------------------------------
-	// Skipped entirely when the meshlet path is active: cluster culling replaces
-	// object culling, and the cluster draw replaces this draw. The prepass and
-	// grid passes above are shared by both paths.
 	if (!use_meshlet)
 	{
-	// ---- one pass, one binding, N indirect draws ---------------------------
-	auto* pass = graph.AddRenderPass<GpuDrivenPassData>("GpuDrivenPass", &graph,
-		RHIGetImmediateCommandList(),
-		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
-		{
-			builder.Write(GetBackBufferResource());
-			if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
+		// ---- cull: reads the PREVIOUS frame's pyramid -------------------------
+		auto* cull_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneCull", &graph,
+			RHIGetImmediateCommandList(),
+			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+			{
+				Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
+					"Shader/gpuscene_cull.comp.spv");
+				data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
 
-			Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
-				"Shader/gpuscene_object.vert.spv");
-			Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
-				"Shader/gpuscene_object.frag.spv");
+				// One SRB per pyramid: the binding names are identical, only the
+				// textures differ, and which one is used is a per-frame choice.
+				for (UInt32 b = 0; b < kHizBuffers; ++b)
+				{
+					ShaderResourceBinding* srb = nullptr;
+					data.pso->CreateShaderResourceBinding(srb, false);
+					srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+					srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+					srb->SetResource("g_meshes", gpu_scene.GetMeshBuffer());
+					srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
+					srb->SetResource("g_candidates", gpu_scene.GetInstanceBuffer());
+					srb->SetResource("g_commands", gpu_scene.GetDrawCommandBuffer());
+					srb->SetResource("g_batches", gpu_scene.GetBatchBuffer());
+					bind_hiz_levels(srb, b);
+					srb->FlushDescriptorWrites();
+					data.extra_srbs.push_back(srb);
+				}
+				delete cs;
+			},
+			[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+			{
+				const UInt32 prev_buffer = (hiz_parity + 1u) % kHizBuffers;
+				const UInt32 count = gpu_scene.GetActiveObjectCount();
+				if (count == 0) return;
+				if (prev_buffer >= data.extra_srbs.size()) return;
 
-			RenderGraphiPipelineStateDesc pd{};
-			pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
-			pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
-			pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
-			pd.vertex_input_layout = Tool::MeshDataPayload::GetVertexInputLayout();
-			pd.render_targets = { GetBackBuffer() };
-			pd.depth_stencil_view = GetDepthStencil();
-			pd.raster_state.sample_count = 1;
-			pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
-			pd.depth_stencil_state.depth_test_enable = true;
-			pd.depth_stencil_state.depth_write_enable = true;
-			pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
-			pd.blend_state.render_targets.resize(1);
-			data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+				// The pyramid this pass reads was written last frame; make sure the
+				// first few frames (before any build ran) have it in the sampled
+				// state rather than leaving it as a colour target.
+				for (UInt32 k = 0; k < kHizLevels; ++k)
+				{
+					if (hiz_textures[prev_buffer][k])
+						in_cmd->TransitionTextureState(hiz_textures[prev_buffer][k],
+							ENUM_RESOURCE_STATE::ShaderResource);
+				}
 
-			// false (not static): SetResource still applies. This happens ONCE —
-			// never per frame, because two frames can be in flight and rewriting
-			// a live descriptor set corrupts the previous frame.
-			data.pso->CreateShaderResourceBinding(data.srb, false);
-			data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
-			data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
-			data.srb->SetResource("g_materials", gpu_scene.GetMaterialBuffer());
-			data.srb->SetResource("g_meshes", gpu_scene.GetMeshBuffer());
-			data.srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
-			data.srb->FlushDescriptorWrites();
+				in_cmd->SetComputePipeline(data.pso);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[prev_buffer]);
+				in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
 
-			// PSO cache hashes shader pointers: delete shaders only after all PSOs
-			// are created (CLAUDE.md RHI Gotchas).
-			delete vs;
-			delete ps;
-		},
-		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
-		{
-			BindBackBufferTarget(in_cmd);
-			in_cmd->SetGraphicsPipeline(data.pso);
-			in_cmd->SetShaderResourceBinding(data.srb);
-			in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
-			in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
-			RecordDraws(in_cmd);
-		});
-	pass->SetIsCullable(false);
-	pass->SetShaderPath("Shader/gpuscene_object");
+				in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
+					ENUM_RESOURCE_STATE::IndirectArgument);
+				in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
+					ENUM_RESOURCE_STATE::ShaderResource);
+			});
+		cull_pass->SetIsCullable(false);
+		cull_pass->SetShaderPath("Shader/gpuscene_cull");
+
+		// ---- draw: writes colour AND this frame's pyramid level 0 -------------
+		auto* draw_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuDrivenDraw", &graph,
+			RHIGetImmediateCommandList(),
+			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+			{
+				builder.Write(GetBackBufferResource());
+				if (GetDepthStencilResource()) builder.Write(GetDepthStencilResource());
+
+				Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
+					"Shader/gpuscene_object.vert.spv");
+				// The MRT variant: identical shading, plus a depth output.
+				Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
+					"Shader/gpuscene_object_mrt.frag.spv");
+
+				for (UInt32 b = 0; b < kHizBuffers; ++b)
+				{
+					RenderGraphiPipelineStateDesc pd{};
+					pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+					pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+					pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+					pd.vertex_input_layout = Tool::MeshDataPayload::GetVertexInputLayout();
+					// Two colour targets: the back buffer and this buffer's Hi-Z level 0.
+					pd.render_targets = { GetBackBuffer(), hiz_textures[b][0] };
+					pd.depth_stencil_view = GetDepthStencil();
+					pd.raster_state.sample_count = 1;
+					pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
+					pd.depth_stencil_state.depth_test_enable = true;
+					pd.depth_stencil_state.depth_write_enable = true;
+					pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
+					pd.blend_state.render_targets.resize(2);
+					data.pso_by_parity[b] = g_render_rhi->CreateRenderPipelineState(pd);
+
+					ShaderResourceBinding* srb = nullptr;
+					data.pso_by_parity[b]->CreateShaderResourceBinding(srb, false);
+					srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+					srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+					srb->SetResource("g_visible", gpu_scene.GetVisibleIDBuffer());
+					srb->FlushDescriptorWrites();
+					data.extra_srbs.push_back(srb);
+				}
+
+				delete vs;
+				delete ps;
+			},
+			[this, bind_hiz_target](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+			{
+				const UInt32 cur_buffer = hiz_parity;
+				if (cur_buffer >= kHizBuffers || !data.pso_by_parity[cur_buffer]) return;
+
+				bind_hiz_target(in_cmd);
+				in_cmd->SetGraphicsPipeline(data.pso_by_parity[cur_buffer]);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[cur_buffer]);
+				in_cmd->SetVertexBuffer(mesh_pool.GetVertexBuffer(), 0, MeshPool::GetVertexStride(), 0);
+				in_cmd->SetIndexBuffer(mesh_pool.GetIndexBuffer(), 0, true);
+				RecordDraws(in_cmd);
+			});
+		draw_pass->SetIsCullable(false);
+		draw_pass->SetShaderPath("Shader/gpuscene_object_mrt");
 	}
 	else
 	{
-		// ---- 4e. meshlet cluster culling -------------------------------------
-		// Same Hi-Z pyramid as the object culler, but the candidates are
-		// (cluster, object) pairs instead of whole objects. Rejected pairs get
-		// zero geometry written into their command rather than being removed
-		// from the list — there is no indirect-count draw to shorten it.
+		// ---- meshlet cull: also reads the previous frame's pyramid -----------
 		auto* mcull = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneMeshletCull", &graph,
 			RHIGetImmediateCommandList(),
 			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
@@ -582,47 +525,46 @@ void GpuDrivenApp::OnInitScene()
 					"Shader/gpuscene_meshlet_cull.comp.spv");
 				data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
 
-				data.pso->CreateShaderResourceBinding(data.srb, false);
-				data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
-				data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
-				data.srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
-				data.srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
-				data.srb->SetResource("g_cluster_commands", meshlet_scene.GetCommandBuffer());
-				for (UInt32 k = 0; k < kHizLevels; ++k)
+				for (UInt32 b = 0; b < kHizBuffers; ++b)
 				{
-					if (!hiz_textures[k]) continue;
-					switch (k)
-					{
-					case 0: data.srb->SetResource("g_hiz0", hiz_textures[0]); break;
-					case 1: data.srb->SetResource("g_hiz1", hiz_textures[1]); break;
-					case 2: data.srb->SetResource("g_hiz2", hiz_textures[2]); break;
-					case 3: data.srb->SetResource("g_hiz3", hiz_textures[3]); break;
-					default: data.srb->SetResource("g_hiz4", hiz_textures[4]); break;
-					}
+					ShaderResourceBinding* srb = nullptr;
+					data.pso->CreateShaderResourceBinding(srb, false);
+					srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+					srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+					srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
+					srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
+					srb->SetResource("g_cluster_commands", meshlet_scene.GetCommandBuffer());
+					bind_hiz_levels(srb, b);
+					srb->FlushDescriptorWrites();
+					data.extra_srbs.push_back(srb);
 				}
-				data.srb->FlushDescriptorWrites();
 				delete cs;
 			},
 			[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
 			{
+				const UInt32 prev_buffer = (hiz_parity + 1u) % kHizBuffers;
 				const UInt32 count = meshlet_scene.GetCommandCount();
 				if (count == 0) return;
+				if (prev_buffer >= data.extra_srbs.size()) return;
+
+				for (UInt32 k = 0; k < kHizLevels; ++k)
+				{
+					if (hiz_textures[prev_buffer][k])
+						in_cmd->TransitionTextureState(hiz_textures[prev_buffer][k],
+							ENUM_RESOURCE_STATE::ShaderResource);
+				}
 
 				in_cmd->SetComputePipeline(data.pso);
-				in_cmd->SetShaderResourceBinding(data.srb);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[prev_buffer]);
 				in_cmd->Dispatch((count + 63u) / 64u, 1, 1);
 
-				// The culler just wrote the draw arguments.
 				in_cmd->ResourceBarrier(ENUM_RESOURCE_STATE::UnorderedAccess,
 					ENUM_RESOURCE_STATE::IndirectArgument);
 			});
 		mcull->SetIsCullable(false);
 		mcull->SetShaderPath("Shader/gpuscene_meshlet_cull");
 
-		// ---- 4f. meshlet draw ------------------------------------------------
-		// One command per pair, each instanced once. Vertex pulling reads the
-		// cluster's vertices from a storage buffer, so no vertex buffer is bound
-		// and no input layout is declared.
+		// ---- meshlet draw: vertex pulling, writes pyramid level 0 too ---------
 		auto* mdraw = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneMeshletDraw", &graph,
 			RHIGetImmediateCommandList(),
 			[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
@@ -632,53 +574,118 @@ void GpuDrivenApp::OnInitScene()
 
 				Shader* vs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Vertex,
 					"Shader/gpuscene_meshlet.vert.spv");
+				// Same varyings as the object vertex shader, so the MRT pixel shader is shared.
 				Shader* ps = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Pixel,
-					"Shader/gpuscene_object.frag.spv");
+					"Shader/gpuscene_object_mrt.frag.spv");
 
-				RenderGraphiPipelineStateDesc pd{};
-				pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
-				pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
-				pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
-				// No vertex_input_layout: every attribute is pulled from storage.
-				pd.render_targets = { GetBackBuffer() };
-				pd.depth_stencil_view = GetDepthStencil();
-				pd.raster_state.sample_count = 1;
-				pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
-				pd.depth_stencil_state.depth_test_enable = true;
-				pd.depth_stencil_state.depth_write_enable = true;
-				pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
-				pd.blend_state.render_targets.resize(1);
-				data.pso = g_render_rhi->CreateRenderPipelineState(pd);
+				for (UInt32 b = 0; b < kHizBuffers; ++b)
+				{
+					RenderGraphiPipelineStateDesc pd{};
+					pd.shaders[ENUM_SHADER_STAGE::Shader_Vertex] = vs;
+					pd.shaders[ENUM_SHADER_STAGE::Shader_Pixel] = ps;
+					pd.primitive_topology = ENUM_PRIMITIVE_TYPE::TriangleList;
+					// No vertex_input_layout: every attribute is pulled from storage.
+					pd.render_targets = { GetBackBuffer(), hiz_textures[b][0] };
+					pd.depth_stencil_view = GetDepthStencil();
+					pd.raster_state.sample_count = 1;
+					pd.raster_state.cull_mode = ENUM_RASTER_CULLMODE::Back;
+					pd.depth_stencil_state.depth_test_enable = true;
+					pd.depth_stencil_state.depth_write_enable = true;
+					pd.depth_stencil_state.depth_func = ENUM_STENCIL_FUNCTION::ENUM_LESS;
+					pd.blend_state.render_targets.resize(2);
+					data.pso_by_parity[b] = g_render_rhi->CreateRenderPipelineState(pd);
 
-				data.pso->CreateShaderResourceBinding(data.srb, false);
-				data.srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
-				data.srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
-				data.srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
-				data.srb->SetResource("g_cluster_refs", meshlet_scene.GetVertexRefBuffer());
-				data.srb->SetResource("g_cluster_tris", meshlet_scene.GetTriangleBuffer());
-				data.srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
-				// The pooled vertex buffer doubles as the pulling source.
-				data.srb->SetResource("g_vertex_data", mesh_pool.GetVertexBuffer());
-				data.srb->FlushDescriptorWrites();
+					ShaderResourceBinding* srb = nullptr;
+					data.pso_by_parity[b]->CreateShaderResourceBinding(srb, false);
+					srb->SetResource("g_scene", gpu_scene.GetUniformBuffer());
+					srb->SetResource("g_objects", gpu_scene.GetObjectBuffer());
+					srb->SetResource("g_clusters", meshlet_scene.GetClusterBuffer());
+					srb->SetResource("g_cluster_refs", meshlet_scene.GetVertexRefBuffer());
+					srb->SetResource("g_cluster_tris", meshlet_scene.GetTriangleBuffer());
+					srb->SetResource("g_cluster_instances", meshlet_scene.GetClusterInstanceBuffer());
+					srb->SetResource("g_vertex_data", mesh_pool.GetVertexBuffer());
+					srb->FlushDescriptorWrites();
+					data.extra_srbs.push_back(srb);
+				}
 
 				delete vs;
 				delete ps;
 			},
-			[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+			[this, bind_hiz_target](CONST GpuDrivenPassData& data, CommandList* in_cmd)
 			{
 				const UInt32 count = meshlet_scene.GetCommandCount();
+				const UInt32 cur_buffer = hiz_parity;
 				if (count == 0) return;
+				if (cur_buffer >= kHizBuffers || !data.pso_by_parity[cur_buffer]) return;
 
-				BindBackBufferTarget(in_cmd);
-				in_cmd->SetGraphicsPipeline(data.pso);
-				in_cmd->SetShaderResourceBinding(data.srb);
-				// No SetVertexBuffer / SetIndexBuffer: the cluster's triangles and
-				// vertices both come from storage buffers.
+				bind_hiz_target(in_cmd);
+				in_cmd->SetGraphicsPipeline(data.pso_by_parity[cur_buffer]);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[cur_buffer]);
 				in_cmd->DrawIndexedIndirect(meshlet_scene.GetCommandBuffer(), 0, count);
 			});
 		mdraw->SetIsCullable(false);
 		mdraw->SetShaderPath("Shader/gpuscene_meshlet");
 	}
+
+	// ---- build the rest of THIS frame's pyramid --------------------------------
+	// Runs after the draw, because level 0 is one of the draw's colour targets.
+	// The result is consumed by the NEXT frame's cull, which is the other half of
+	// the double buffering.
+	auto* hiz_pass = graph.AddRenderPass<GpuDrivenPassData>("GpuSceneHiz", &graph,
+		RHIGetImmediateCommandList(),
+		[&](GpuDrivenPassData& data, RenderGraphPassBuilder& builder, CommandList* in_cmd)
+		{
+			Shader* cs = Tool::ShaderLibrary::LoadShader(ENUM_SHADER_STAGE::Shader_Compute,
+				"Shader/gpuscene_hiz.comp.spv");
+			data.pso = Tool::ShaderLibrary::CreateComputePSO(cs);
+
+			// Every level pair of every buffer: four per buffer, so eight SRBs.
+			for (UInt32 b = 0; b < kHizBuffers; ++b)
+			{
+				for (UInt32 k = 0; k + 1u < kHizLevels; ++k)
+				{
+					ShaderResourceBinding* srb = nullptr;
+					data.pso->CreateShaderResourceBinding(srb, false);
+					srb->SetResource("g_src", hiz_textures[b][k]);
+					srb->SetResource("g_dst", hiz_textures[b][k + 1u]);
+					srb->FlushDescriptorWrites();
+					data.extra_srbs.push_back(srb);
+				}
+			}
+			delete cs;
+		},
+		[this](CONST GpuDrivenPassData& data, CommandList* in_cmd)
+		{
+			const UInt32 cur_buffer = hiz_parity;
+			if (!hiz_textures[cur_buffer][0]) return;
+
+			// Level 0 was a colour target; the reducer samples it.
+			in_cmd->TransitionTextureState(hiz_textures[cur_buffer][0],
+				ENUM_RESOURCE_STATE::ShaderResource);
+
+			const UInt32 view_w = GetViewportWidth();
+			const UInt32 view_h = GetViewportHeight();
+
+			// SRBs are laid out buffer-major: [0..kHizLevels-2] is buffer 0.
+			const UInt32 base = cur_buffer * (kHizLevels - 1u);
+
+			for (UInt32 k = 0; k + 1u < kHizLevels; ++k)
+			{
+				const UInt32 sw = (view_w >> k) > 0u ? (view_w >> k) : 1u;
+				const UInt32 sh = (view_h >> k) > 0u ? (view_h >> k) : 1u;
+
+				in_cmd->SetComputePipeline(data.pso);
+				in_cmd->SetShaderResourceBinding(data.extra_srbs[base + k]);
+				in_cmd->Dispatch((sw + 7u) / 8u, (sh + 7u) / 8u, 1);
+
+				// Written level becomes a shader resource for the next dispatch and
+				// for next frame's cull. Retained texture, so this is manual.
+				in_cmd->TransitionTextureState(hiz_textures[cur_buffer][k + 1u],
+					ENUM_RESOURCE_STATE::ShaderResource);
+			}
+		});
+	hiz_pass->SetIsCullable(false);
+	hiz_pass->SetShaderPath("Shader/gpuscene_hiz");
 }
 
 void GpuDrivenApp::OnShutdownScene()
@@ -687,10 +694,13 @@ void GpuDrivenApp::OnShutdownScene()
 	gpu_scene.Shutdown();
 	meshlet_scene.Shutdown();
 	mesh_pool.Release();
-	for (UInt32 k = 0; k < kHizLevels; ++k)
+	for (UInt32 b = 0; b < kHizBuffers; ++b)
 	{
-		delete hiz_textures[k];
-		hiz_textures[k] = nullptr;
+		for (UInt32 k = 0; k < kHizLevels; ++k)
+		{
+			delete hiz_textures[b][k];
+			hiz_textures[b][k] = nullptr;
+		}
 	}
 }
 
@@ -705,6 +715,7 @@ void GpuDrivenApp::OnUpdate(float dt)
 	u.camera_position = glm::vec4(scene_view.GetViewLocation(), 1.0f);
 	u.light_dir = glm::vec4(glm::normalize(glm::vec3(0.4f, 0.8f, 0.45f)), 0.0f);
 	ExtractFrustumPlanes(u.view_proj, u.frustum_planes);
+	hiz_parity = frame_index % kHizBuffers;
 	u.counts.x = gpu_scene.GetActiveObjectCount();
 	u.counts.y = frame_index++;
 	u.counts.z = culling_enabled ? 1u : 0u;
