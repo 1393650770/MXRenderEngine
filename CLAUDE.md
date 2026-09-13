@@ -304,6 +304,7 @@ pin one.
 | LodLevel | one colour per level of detail |
 | MaterialId | hash per material — batching |
 | TriangleDensity | blue→red heat map of triangles per cluster |
+| HizLevel | the Hi-Z pyramid itself — level chosen by `lodParams.w` |
 
 Two details carry the whole feature:
 
@@ -322,6 +323,19 @@ Two details carry the whole feature:
 **The depth output stays the REAL depth in every view.** Publishing the debug
 colour instead would feed it into the next frame's pyramid and culling would
 start rejecting geometry at random.
+
+The HizLevel view deserves one warning: **the raw depth is useless to look at.**
+Under a perspective projection nearly everything lands within a whisker of 1.0 —
+at a 22-unit camera distance with a 200-unit far plane, geometry sits around
+0.9955 and empty sky is 1.0, so a gradient over raw depth is a flat wash. The
+view linearises it first, recovering the clip planes from the projection matrix
+(`P[3][2] / P[2][2]` is near; far follows) so nothing extra had to be plumbed
+through the uniform block. After linearising, near is warm and far is cold, and
+untouched texels (still at the 1.0 clear value) are deep blue — which is exactly
+the question being asked of it.
+
+It shows the pyramid the cull **consumed** this frame, not the one just built,
+because that is the one whose correctness decides what gets drawn.
 
 Expected side effect: with a view active the scene draws un-culled, so the
 published depth is more complete than normal and the next frame culls less.
